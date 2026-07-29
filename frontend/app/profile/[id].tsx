@@ -59,7 +59,10 @@ export default function ProfileDetailScreen() {
     setError(null);
     try {
       const data = await api.getUserProfile(id as string);
-      setProfile(data);
+      // Backend returns { user_id, email, profile: {name, bio, city, ...}, ... }
+      // Flatten profile fields to top level for easier rendering
+      const flat = data?.profile ? { user_id: data.user_id, ...data.profile } : data;
+      setProfile(flat);
     } catch (err: any) {
       setError(err?.message || 'Failed to load profile');
     } finally {
