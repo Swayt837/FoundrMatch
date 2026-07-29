@@ -1,0 +1,222 @@
+{
+  "app_name": "CoFound",
+  "personality": "6 Glass / Luxe",
+  "personality_one_liner": "Meet the person you'll build your next company with—a cinematic, glass-layered interface optimized for premium matching.",
+  "color": {
+    "surface": "#09090B",
+    "onSurface": "#FAFAFA",
+    "surfaceSecondary": "#18181B",
+    "onSurfaceSecondary": "#A1A1AA",
+    "surfaceTertiary": "#27272A",
+    "onSurfaceTertiary": "#D4D4D8",
+    "surfaceInverse": "#FAFAFA",
+    "onSurfaceInverse": "#09090B",
+    "brand": "#D4AF37",
+    "brandPrimary": "#D4AF37",
+    "onBrandPrimary": "#09090B",
+    "brandSecondary": "#382C1E",
+    "onBrandSecondary": "#D4AF37",
+    "brandTertiary": "#261F17",
+    "onBrandTertiary": "#FDE5C5",
+    "success": "#2D4C3B",
+    "onSuccess": "#86EFAC",
+    "warning": "#5A3A1D",
+    "onWarning": "#FDE047",
+    "error": "#5C1D24",
+    "onError": "#FDA4AF",
+    "info": "#1E3146",
+    "onInfo": "#93C5FD",
+    "border": "#27272A",
+    "borderStrong": "#3F3F46",
+    "divider": "#18181B"
+  },
+  "typography": {
+    "displayFontFamily": "Geist",
+    "textFontFamily": "Geist",
+    "scale": {
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24
+    }
+  },
+  "spacing": {
+    "rule": "Generous Apple-like margins. Cards never sit flush to screen edges. Embrace negative space to spotlight high-value content.",
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "radius_tokens": {
+    "sm": 6,
+    "md": 12,
+    "lg": 20,
+    "pill": 999
+  },
+  "shadow_tier": "1",
+  "navigation": "bottom_tabs",
+  "icon_set": "lucide-react-native",
+  "glassmorphism": {
+    "enabled": true,
+    "do's": [
+      "Apply expo-blur to the bottom tab bar and sticky headers over scrolling content.",
+      "Use frosted glass overlays on featured Discovery cards over the background image.",
+      "Ensure underlying tint opacity is \u226575% of surface to guarantee text readability.",
+      "Use blur for match celebration cinematic reveals."
+    ],
+    "dont's": [
+      "Do not blur form fields or standard list rows.",
+      "Do not use glass without a translucent tinted base underneath.",
+      "Do not stack more than two glass surfaces per screen."
+    ]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-glass-effect",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler"
+  },
+  "screens": [
+    {
+      "name": "Welcome/Splash",
+      "purpose": "Establish premium identity with cinematic lighting and a clear entry point.",
+      "states": {
+        "loading": "Subtle pulsing brand mark.",
+        "empty": "N/A",
+        "error": "N/A"
+      },
+      "layout": "Full-bleed abstract dark geometric background. Large display typography at the top, primary CTA anchored at the bottom thumb zone with a glass backdrop."
+    },
+    {
+      "name": "Auth (Login/Register)",
+      "purpose": "Minimal friction entry with high perceived trust.",
+      "states": {
+        "loading": "Button shows inline spinner.",
+        "empty": "N/A",
+        "error": "Inline red text below inputs."
+      },
+      "layout": "Single column. Large inputs with labels above. surfaceTertiary background for inputs. Sticky CTA at the bottom inside KeyboardAvoidingView."
+    },
+    {
+      "name": "Multi-step Onboarding",
+      "purpose": "Collect nuanced professional data while maintaining high engagement.",
+      "states": {
+        "loading": "Spinner during data submission.",
+        "empty": "N/A",
+        "error": "Toast overlay with retry."
+      },
+      "layout": "Persistent progress bar at the top edge. Each step features a large headline (xl/2xl), generous vertical rhythm, and oversized pill-shaped selectable options. Bottom sticky CTA."
+    },
+    {
+      "name": "Discovery/Swipe",
+      "purpose": "Evaluate potential co-founders through a rich, data-driven card stack.",
+      "states": {
+        "loading": "Skeleton cards with shimmer effect.",
+        "empty": "Dark atmospheric illustration indicating no more profiles.",
+        "error": "Readable message with a retry button centered on screen."
+      },
+      "layout": "Hero screen. Full-bleed vertical image cards (safe-area respected) with a heavy gradient-to-dark scrim (top-to-bottom, \u226570% surfaceInverse at bottom). Professional stats overlay the bottom 30%."
+    },
+    {
+      "name": "Match Celebration",
+      "purpose": "Deliver a cinematic, dopamine-inducing moment when mutual interest occurs.",
+      "states": {
+        "loading": "N/A",
+        "empty": "N/A",
+        "error": "N/A"
+      },
+      "layout": "Full screen overlay using heavy glassmorphism. Split-screen profile photos merging, elegant typography ('It\\'s a Match'), and a brandPrimary CTA to start chatting."
+    },
+    {
+      "name": "Matches List & Chat",
+      "purpose": "Superhuman-fast list of conversations and an iMessage-quality chat thread.",
+      "states": {
+        "loading": "Skeleton rows.",
+        "empty": "Tinted icon container with 'No conversations yet'.",
+        "error": "Toast with retry."
+      },
+      "layout": "List: Clean rows, minimum 56pt height, large circular avatars, truncated preview. Chat: High-contrast bubbles, surfaceTertiary for recipient, brandSecondary for sender. Sticky input field."
+    },
+    {
+      "name": "Deal Room",
+      "purpose": "Provide a collaborative space for matched founders to iterate on ideas.",
+      "states": {
+        "loading": "Skeleton UI for documents/tasks.",
+        "empty": "Illustration + 'Start your first project milestone'.",
+        "error": "Full-screen error + retry."
+      },
+      "layout": "Tabbed structure (Tasks, Roadmap, Docs). Card-based grid with soft shadows. Prominent FAB (brandPrimary) for adding new items."
+    },
+    {
+      "name": "AI Assistant Chat",
+      "purpose": "Consult Claude for business guidance in a sleek, command-driven interface.",
+      "states": {
+        "loading": "Thinking indicator with brand-tinted glow.",
+        "empty": "Suggested prompts in glass chips.",
+        "error": "Error bubble."
+      },
+      "layout": "Message thread with distinct styling for the AI (maybe a subtle brandTertiary background). Bottom pinned input with a premium blur backdrop."
+    },
+    {
+      "name": "Projects Board",
+      "purpose": "Browse opportunities through structured, scannable data.",
+      "states": {
+        "loading": "Skeleton cards.",
+        "empty": "No projects match your filters.",
+        "error": "Failed to load board."
+      },
+      "layout": "Multi-column grid or wide single-column cards. Pinned filter row (glass) below the header. Each card displays tags (surfaceTertiary) and key metrics."
+    },
+    {
+      "name": "Profile",
+      "purpose": "Showcase user's professional gamification and stats.",
+      "states": {
+        "loading": "Skeleton stats.",
+        "empty": "N/A",
+        "error": "N/A"
+      },
+      "layout": "Hero image/banner with a dark gradient overlay. Profile avatar overlapping the header. Stats displayed in a 2-col or 3-col grid with large numeric typography."
+    }
+  ],
+  "haptics": {
+    "tab_press": "light",
+    "card_swipe": "medium",
+    "match_success": "success",
+    "button_press": "light",
+    "toggle_switch": "light"
+  },
+  "images": {
+    "splash_bg": {
+      "url": "https://images.unsplash.com/photo-1637775297458-7443ffd545b2?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAxODF8MHwxfHNlYXJjaHwyfHxhYnN0cmFjdCUyMGRhcmslMjBsdXh1cnklMjBnZW9tZXRyaWMlMjB0ZXh0dXJlJTIwYmFja2dyb3VuZHxlbnwwfHx8fDE3ODUzMjcyNDh8MA&ixlib=rb-4.1.0&q=85",
+      "alt": "Dark geometric luxury background"
+    },
+    "discovery_placeholder": {
+      "url": "https://images.unsplash.com/photo-1642290687545-8ab7e6002472?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA3MDR8MHwxfHNlYXJjaHwyfHxwcmVtaXVtJTIwcG9ydHJhaXQlMjBibGFjayUyMGFuZCUyMHdoaXRlfGVufDB8fHx8MTc4NTMyNzI2MXww&ixlib=rb-4.1.0&q=85",
+      "alt": "Professional founder portrait"
+    },
+    "deal_room_empty": {
+      "url": "https://images.unsplash.com/photo-1510519138101-570d1dca3d66?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1ODh8MHwxfHNlYXJjaHwyfHxwcmVtaXVtJTIwc2xlZWslMjB3b3Jrc3BhY2UlMjBkYXJrJTIwYXRtb3NwaGVyaWN8ZW58MHx8fHwxNzg1MzI3MjYxfDA&ixlib=rb-4.1.0&q=85",
+      "alt": "Sleek atmospheric workspace"
+    }
+  },
+  "instructions_to_main_agent": [
+    "Strictly adhere to the '6 Glass / Luxe' DARK personality. Use the #09090B to #27272A slate spectrum for backgrounds and cards to avoid pure black fatigue.",
+    "BANNED: Any trace of blue, purple, or indigo. Stick to the defined brand palette (Antique Gold / #D4AF37) for all primary accents and highlights.",
+    "Typography must be Geist for both display and body. Use weight to establish hierarchy but never exceed 500. Use sizing (xl, 2xl) to create contrast.",
+    "Implement the gradient-to-dark scrim pattern strictly on the Discovery/Swipe hero cards. Text over images must sit in the bottom 30-40% over a 3-stop vertical gradient reaching \u226570% surfaceInverse opacity.",
+    "Include haptic feedback strictly mapped in the 'haptics' block (swipe events, match celebration, tab switches).",
+    "For the Chat UI, imitate the spacing and bubble contrast of iMessage but adapt it to our dark palette (surfaceTertiary vs brandSecondary).",
+    "For empty states, utilize the fetched images layered with a subtle brandTertiary tint and blur to create a rich, non-clinical environment.",
+    "Do NOT use emojis anywhere in the system UI. Use lucide-react-native consistently."
+  ]
+}
