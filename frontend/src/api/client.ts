@@ -139,9 +139,26 @@ class APIClient {
     return this.request(`/deal-rooms/${roomId}`);
   }
 
+  async getDealRoomByMatch(matchId: string) {
+    return this.request(`/matches/${matchId}/deal-room`);
+  }
+
   async generateRoadmap(roomId: string) {
     return this.request(`/deal-rooms/${roomId}/generate-roadmap`, {
       method: 'POST',
+    });
+  }
+
+  async addTask(roomId: string, title: string, description: string = '') {
+    return this.request(`/deal-rooms/${roomId}/tasks`, {
+      method: 'POST',
+      body: JSON.stringify({ title, description }),
+    });
+  }
+
+  async toggleTask(roomId: string, taskId: string) {
+    return this.request(`/deal-rooms/${roomId}/tasks/${taskId}`, {
+      method: 'PATCH',
     });
   }
 
@@ -160,6 +177,21 @@ class APIClient {
   // AI
   async getBusinessIdeas(matchId: string) {
     return this.request(`/ai/business-ideas/${matchId}`);
+  }
+
+  async copilotChat(message: string, history: any[] = []) {
+    return this.request('/ai/copilot/chat', {
+      method: 'POST',
+      body: JSON.stringify({ message, history }),
+    });
+  }
+
+  // Profile update
+  async updateProfile(data: any) {
+    return this.request('/profile/update', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
   }
 }
 

@@ -208,7 +208,11 @@ export default function ProfileScreen() {
 
         {/* Actions */}
         <View style={styles.section}>
-          <TouchableOpacity style={styles.actionRow} testID="profile-edit">
+          <TouchableOpacity
+            style={styles.actionRow}
+            onPress={() => router.push('/profile/edit')}
+            testID="profile-edit"
+          >
             <Edit3 size={18} color={theme.colors.text} strokeWidth={1.75} />
             <Text style={styles.actionText}>Edit profile</Text>
           </TouchableOpacity>

@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Send, Sparkles, Lightbulb, Rocket, Target, TrendingUp } from 'lucide-react-native';
+import { api } from '@/src/api/client';
 import { theme } from '@/src/theme';
 
 const PROMPTS = [
@@ -34,21 +35,26 @@ export default function AssistantScreen() {
     if (!content || loading) return;
 
     setInput('');
-    setMessages(prev => [...prev, { role: 'user', content }]);
+    const newMessages: Message[] = [...messages, { role: 'user', content }];
+    setMessages(newMessages);
     setLoading(true);
 
-    // Placeholder AI response - to be wired with backend streaming endpoint
-    setTimeout(() => {
+    try {
+      const history = messages.map(m => ({ role: m.role, content: m.content }));
+      const response = await api.copilotChat(content, history);
       setMessages(prev => [
         ...prev,
-        {
-          role: 'assistant',
-          content: `Great question about "${content}".\n\nAs your AI cofounder, I'd suggest starting by validating the problem with 10 potential users this week. Focus on their pain, not your solution.\n\nWould you like me to draft a validation script or generate a target user persona?`,
-        },
+        { role: 'assistant', content: response.response || 'Sorry, I could not generate a response.' },
       ]);
+    } catch (error: any) {
+      setMessages(prev => [
+        ...prev,
+        { role: 'assistant', content: `Something went wrong: ${error.message || 'try again in a moment.'}` },
+      ]);
+    } finally {
       setLoading(false);
-      scrollRef.current?.scrollToEnd({ animated: true });
-    }, 1200);
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+    }
   };
 
   return (

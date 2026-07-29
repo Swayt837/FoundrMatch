@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { Zap, Heart, ChevronRight } from 'lucide-react-native';
+import { Zap, Heart, ChevronRight, Rocket } from 'lucide-react-native';
 import { api } from '@/src/api/client';
 import { theme } from '@/src/theme';
 
@@ -62,35 +62,45 @@ export default function MatchesScreen() {
     const compatScore = Math.round(compat?.overall_score || 0);
 
     return (
-      <TouchableOpacity
-        style={styles.row}
-        onPress={() => goToChat(item.match_id)}
-        activeOpacity={0.6}
-        testID={`match-row-${item.match_id}`}
-      >
-        <Image
-          source={{ uri: profile.photos?.[0] || PLACEHOLDER }}
-          style={styles.avatar}
-        />
-        <View style={styles.rowContent}>
-          <View style={styles.rowTop}>
-            <Text style={styles.rowName} numberOfLines={1}>{profile.name}</Text>
-            <View style={styles.compatBadge}>
-              <Zap size={10} color={theme.colors.brand} strokeWidth={2} fill={theme.colors.brand} />
-              <Text style={styles.compatText}>{compatScore}%</Text>
+      <View style={styles.rowContainer}>
+        <TouchableOpacity
+          style={styles.row}
+          onPress={() => goToChat(item.match_id)}
+          activeOpacity={0.6}
+          testID={`match-row-${item.match_id}`}
+        >
+          <Image
+            source={{ uri: profile.photos?.[0] || PLACEHOLDER }}
+            style={styles.avatar}
+          />
+          <View style={styles.rowContent}>
+            <View style={styles.rowTop}>
+              <Text style={styles.rowName} numberOfLines={1}>{profile.name}</Text>
+              <View style={styles.compatBadge}>
+                <Zap size={10} color={theme.colors.brand} strokeWidth={2} fill={theme.colors.brand} />
+                <Text style={styles.compatText}>{compatScore}%</Text>
+              </View>
             </View>
-          </View>
-          <Text style={styles.rowMeta} numberOfLines={1}>
-            {profile.profession?.replace(/_/g, ' ')} · {profile.city}
-          </Text>
-          {compat?.explanation && (
-            <Text style={styles.rowExplain} numberOfLines={1}>
-              {compat.explanation}
+            <Text style={styles.rowMeta} numberOfLines={1}>
+              {profile.profession?.replace(/_/g, ' ')} · {profile.city}
             </Text>
-          )}
-        </View>
-        <ChevronRight size={18} color={theme.colors.textSecondary} strokeWidth={1.5} />
-      </TouchableOpacity>
+            {compat?.explanation && (
+              <Text style={styles.rowExplain} numberOfLines={1}>
+                {compat.explanation}
+              </Text>
+            )}
+          </View>
+          <ChevronRight size={18} color={theme.colors.textSecondary} strokeWidth={1.5} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.dealRoomIconBtn}
+          onPress={() => router.push(`/deal-room/${item.match_id}`)}
+          testID={`match-dealroom-${item.match_id}`}
+        >
+          <Rocket size={14} color={theme.colors.brand} strokeWidth={1.75} />
+          <Text style={styles.dealRoomIconText}>Deal Room</Text>
+        </TouchableOpacity>
+      </View>
     );
   };
 
@@ -185,11 +195,33 @@ const styles = StyleSheet.create({
   listContent: {
     paddingHorizontal: theme.spacing.xl,
   },
+  rowContainer: {
+    gap: theme.spacing.sm,
+    paddingVertical: theme.spacing.xs,
+  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: theme.spacing.md,
     gap: theme.spacing.md,
+  },
+  dealRoomIconBtn: {
+    flexDirection: 'row',
+    alignSelf: 'flex-start',
+    alignItems: 'center',
+    gap: 6,
+    marginLeft: 52 + theme.spacing.md,
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: 6,
+    borderRadius: theme.radius.pill,
+    backgroundColor: theme.colors.brandTertiary,
+    borderWidth: 1,
+    borderColor: 'rgba(212,175,55,0.3)',
+  },
+  dealRoomIconText: {
+    ...theme.typography.caption,
+    color: theme.colors.brand,
+    fontWeight: '600',
   },
   avatar: {
     width: 52,

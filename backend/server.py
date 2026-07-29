@@ -11,6 +11,7 @@ import os
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
+from pydantic import BaseModel
 
 # Import models and utilities
 from models import (
@@ -285,6 +286,45 @@ async def get_profile(
         raise HTTPException(status_code=404, detail="User not found")
     
     return user
+
+
+@app.post("/api/profile/update")
+async def update_profile(
+    updates: Dict[str, Any],
+    current_user: dict = Depends(get_current_user)
+):
+    """Partial update of the current user's profile fields"""
+    # Whitelist allowed profile fields for security
+    allowed = {
+        "name", "bio", "country", "city", "languages", "age",
+        "profession", "skills", "experience", "availability",
+        "budget", "objectives", "work_style", "values", "photos"
+    }
+    
+    set_ops = {"updated_at": get_utc_now()}
+    for key, value in updates.items():
+        if key in allowed:
+            set_ops[f"profile.{key}"] = value
+    
+    if len(set_ops) == 1:
+        raise HTTPException(status_code=400, detail="No valid fields to update")
+    
+    await users_collection.update_one(
+        {"user_id": current_user["user_id"]},
+        {"$set": set_ops}
+    )
+    
+    # Invalidate compat cache for this user
+    from database import db as mongo_db
+    await mongo_db.compatibility_cache.delete_many(
+        {"pair_key": {"$regex": current_user["user_id"]}}
+    )
+    
+    updated = await users_collection.find_one(
+        {"user_id": current_user["user_id"]},
+        {"_id": 0, "password_hash": 0, "google_id": 0}
+    )
+    return updated
 
 
 # ===== DISCOVERY & MATCHING ROUTES =====
@@ -614,6 +654,80 @@ async def generate_roadmap(
     return roadmap
 
 
+class TaskCreate(BaseModel):
+    title: str
+    description: Optional[str] = ""
+    assigned_to: Optional[str] = None
+
+
+@app.post("/api/deal-rooms/{room_id}/tasks")
+async def add_task(
+    room_id: str,
+    task: TaskCreate,
+    current_user: dict = Depends(get_current_user)
+):
+    """Add a task to a deal room"""
+    room = await deal_rooms_collection.find_one({"room_id": room_id})
+    if not room:
+        raise HTTPException(status_code=404, detail="Deal room not found")
+    if current_user["user_id"] not in room["participants"]:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    task_dict = {
+        "task_id": f"task_{get_utc_now().timestamp()}",
+        "title": task.title,
+        "description": task.description or "",
+        "assigned_to": task.assigned_to or current_user["user_id"],
+        "completed": False,
+        "created_at": get_utc_now(),
+    }
+    
+    await deal_rooms_collection.update_one(
+        {"room_id": room_id},
+        {"$push": {"tasks": task_dict}, "$set": {"updated_at": get_utc_now()}}
+    )
+    return task_dict
+
+
+@app.patch("/api/deal-rooms/{room_id}/tasks/{task_id}")
+async def toggle_task(
+    room_id: str,
+    task_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Toggle task completion"""
+    room = await deal_rooms_collection.find_one({"room_id": room_id})
+    if not room:
+        raise HTTPException(status_code=404, detail="Deal room not found")
+    if current_user["user_id"] not in room["participants"]:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    tasks = room.get("tasks", [])
+    for t in tasks:
+        if t["task_id"] == task_id:
+            t["completed"] = not t.get("completed", False)
+    
+    await deal_rooms_collection.update_one(
+        {"room_id": room_id},
+        {"$set": {"tasks": tasks, "updated_at": get_utc_now()}}
+    )
+    return {"tasks": tasks}
+
+
+@app.get("/api/matches/{match_id}/deal-room")
+async def get_or_create_deal_room(
+    match_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Get the deal room for a match, or return null if it doesn't exist"""
+    room = await deal_rooms_collection.find_one({"match_id": match_id}, {"_id": 0})
+    if not room:
+        return {"room": None}
+    if current_user["user_id"] not in room["participants"]:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    return {"room": room}
+
+
 # ===== PROJECTS ROUTES =====
 
 @app.post("/api/projects/create")
@@ -690,6 +804,66 @@ async def get_business_ideas(
     )
     
     return {"ideas": ideas}
+
+
+# ===== AI COPILOT CHAT =====
+
+
+class AICopilotRequest(BaseModel):
+    message: str
+    history: List[Dict[str, str]] = []
+
+
+@app.post("/api/ai/copilot/chat")
+async def copilot_chat(
+    payload: AICopilotRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    General AI copilot chat - non-streaming for simplicity.
+    Uses user's profile as context.
+    """
+    from ai_service import LlmChat, UserMessage
+    
+    profile = current_user.get("profile", {})
+    profession = profile.get("profession", "founder")
+    skills = ", ".join(profile.get("skills", [])[:5]) or "not specified"
+    objectives = ", ".join(profile.get("objectives", [])[:3]) or "not specified"
+    experience = profile.get("experience", "not specified")
+    
+    system_message = f"""You are CoFound AI Copilot, an expert startup advisor helping entrepreneurs build their business.
+
+User context:
+- Profession: {profession}
+- Skills: {skills}
+- Experience: {experience}
+- Objectives: {objectives}
+
+Provide concise, actionable advice. Use markdown when helpful. Ask clarifying questions when needed. 
+Keep responses focused and under 200 words unless the user asks for depth."""
+    
+    session_id = f"copilot-{current_user['user_id']}"
+    
+    try:
+        chat = LlmChat(
+            api_key=os.getenv("EMERGENT_LLM_KEY"),
+            session_id=session_id,
+            system_message=system_message
+        ).with_model("anthropic", "claude-sonnet-4-6")
+        
+        user_msg = UserMessage(text=payload.message)
+        
+        response_text = ""
+        async for event in chat.stream_message(user_msg):
+            if isinstance(event, TextDelta):
+                response_text += event.content
+            elif isinstance(event, StreamDone):
+                break
+        
+        return {"response": response_text}
+    except Exception as e:
+        print(f"AI Copilot error: {e}")
+        raise HTTPException(status_code=500, detail=f"AI service error: {str(e)}")
 
 
 # ===== HEALTH CHECK =====

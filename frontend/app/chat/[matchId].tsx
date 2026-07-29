@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ArrowLeft, Send, Phone, Video, Sparkles } from 'lucide-react-native';
+import { ArrowLeft, Send, Phone, Video, Sparkles, Rocket } from 'lucide-react-native';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { api } from '@/src/api/client';
 import { theme } from '@/src/theme';
@@ -106,11 +106,13 @@ export default function ChatScreen() {
           </View>
         </View>
         <View style={styles.headerActions}>
-          <TouchableOpacity style={styles.iconButton}>
-            <Phone size={18} color={theme.colors.text} strokeWidth={1.75} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.iconButton}>
-            <Video size={18} color={theme.colors.text} strokeWidth={1.75} />
+          <TouchableOpacity
+            style={styles.dealRoomBtn}
+            onPress={() => router.push(`/deal-room/${matchId}`)}
+            testID="chat-open-dealroom"
+          >
+            <Rocket size={14} color={theme.colors.brand} strokeWidth={1.75} />
+            <Text style={styles.dealRoomText}>Deal Room</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -214,6 +216,22 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.surfaceSecondary,
     borderWidth: 1, borderColor: theme.colors.border,
     alignItems: 'center', justifyContent: 'center',
+  },
+  dealRoomBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: 8,
+    borderRadius: theme.radius.pill,
+    backgroundColor: theme.colors.brandTertiary,
+    borderWidth: 1,
+    borderColor: 'rgba(212,175,55,0.3)',
+  },
+  dealRoomText: {
+    ...theme.typography.caption,
+    color: theme.colors.brand,
+    fontWeight: '600',
   },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   messagesScroll: { flex: 1 },
