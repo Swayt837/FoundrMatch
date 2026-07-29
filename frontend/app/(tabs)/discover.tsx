@@ -21,6 +21,7 @@ import { BlurView } from 'expo-blur';
 import { useRouter } from 'expo-router';
 import { X, Heart, Zap, MapPin, Briefcase, Clock, Sparkles, Info } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
+import { useAuth } from '@/src/contexts/AuthContext';
 import { api } from '@/src/api/client';
 import { theme } from '@/src/theme';
 
@@ -46,6 +47,7 @@ interface MatchModal {
 export default function DiscoverScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
   const [cards, setCards] = useState<Card[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -53,8 +55,10 @@ export default function DiscoverScreen() {
   const position = useRef(new Animated.ValueXY()).current;
 
   useEffect(() => {
-    loadCards();
-  }, []);
+    if (user) {
+      loadCards();
+    }
+  }, [user]);
 
   const haptic = (type: 'light' | 'medium' | 'success' = 'light') => {
     if (Platform.OS === 'web') return;
@@ -187,8 +191,8 @@ export default function DiscoverScreen() {
 
   const currentCard = cards[currentIndex];
   const nextCard = cards[currentIndex + 1];
-  const user = currentCard.user;
-  const profile = user.profile;
+  const cardUser = currentCard.user;
+  const profile = cardUser.profile;
   const compatibility = currentCard.compatibility;
   const photoUri = profile.photos?.[0] || PLACEHOLDER_IMAGE;
 

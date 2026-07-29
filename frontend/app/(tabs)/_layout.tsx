@@ -5,7 +5,7 @@ import React from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 import { Tabs } from 'expo-router';
 import { BlurView } from 'expo-blur';
-import { Compass, Heart, MessageCircle, Sparkles, User } from 'lucide-react-native';
+import { Compass, Heart, Briefcase, Sparkles, User } from 'lucide-react-native';
 import { theme } from '@/src/theme';
 
 export default function TabsLayout() {
@@ -83,7 +83,7 @@ export default function TabsLayout() {
         options={{
           title: 'Projects',
           tabBarIcon: ({ color, focused }) => (
-            <MessageCircle size={22} color={color} strokeWidth={focused ? 2 : 1.75} />
+            <Briefcase size={22} color={color} strokeWidth={focused ? 2 : 1.75} />
           ),
         }}
       />

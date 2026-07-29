@@ -1,0 +1,59 @@
+{
+  "summary": "Frontend-only E2E on mobile viewport (390x844). Register -> full 6-step Onboarding -> Discover flow tested. VERIFIED FIXES: (1) discover.tsx compiles/renders (previous 'user has already been declared' shadowing bug is gone; screen mounts, loader shows, no red-screen). (2) Projects tab now correctly uses the Briefcase icon in the bottom tab bar (confirmed visually in bottom nav — see /tmp/projects_tab.png). (3) All 6 onboarding steps navigate correctly using new testIDs. NOT VERIFIED (blocked): Discover swipe card visuals (full-bleed image, gradient scrim, 'SWIPE TO CONNECT' eyebrow, 'AI Curated' badge, compatibility %, name/age/location, skill chips, AI explanation, gold heart / X buttons) — the /api/discovery/cards call times out at the K8s ingress with a 502 after ~60s from the browser. A direct curl to the same endpoint DOES succeed in ~16s and returns all 8 seeded founder profiles (Sarah Chen, Marcus Reid, Elena Rossi, David Kim, Aisha Patel, Thomas Weber, Sofia Martins, James Okoye) plus a few live users. So seed data is confirmed present in MongoDB; the blocker is backend latency (per-card AI compatibility explanation is generated synchronously for all N cards on every /discovery/cards call). Frontend gracefully falls back to the 'You're all caught up' empty state after the 502, which masks the real error. Swipe left/right and match-modal flows therefore could not be exercised end-to-end in the web preview. Also: root bcrypt/passlib warning still present in backend logs, non-blocking.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "GET /api/discovery/cards", "issue": "Endpoint takes ~15-30s per call (AI compatibility explanation generated synchronously for every candidate) and consistently 502s at the ingress when called from the web preview. This makes the entire Discover swipe experience non-functional on web despite seed data existing. Fix by: parallelizing the per-card AI calls with asyncio.gather, caching compatibility results per (user_a, user_b) pair in Mongo, or moving AI explanation to on-demand (fetch only when a card becomes the top of the stack). Reference: /app/backend/server.py:292 get_discovery_cards.", "priority": "CRITICAL"}
+    ],
+    "minor": [
+      {"endpoint": "startup", "issue": "passlib bcrypt version-detection warning on startup ('module bcrypt has no attribute __about__') — not blocking auth but noisy. Pin passlib>=1.7.5 or bcrypt<4.1 to silence."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "DiscoverScreen loading state", "issue": "When /api/discovery/cards 502s, loadCards() catches the error, logs it, and simply calls setLoading(false) with an empty cards[], so the user sees 'You're all caught up' instead of a differentiated error/retry state. This masks a real backend failure as a normal empty result and prevents the user from ever retrying successfully. Reference: /app/frontend/app/(tabs)/discover.tsx:72-83.", "testID": "discover-empty", "priority": "HIGH"},
+      {"component": "DiscoverScreen loading UX", "issue": "Loader ('Curating profiles for you...') can display for 60+ seconds with no progress feedback or timeout, because the backend takes that long. Consider showing a soft timeout with a Retry after e.g. 15s, or streaming cards as they become ready.", "testID": "discover-screen", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [
+      {"flow": "Discover swipe deck rendering", "issue": "Cannot validate the premium Discover card UI (full-bleed image + gradient scrim + compatibility badge + skill pills + AI explanation + gold like/X buttons) because the backend endpoint 502s from the web preview. Seed data IS present in Mongo (curl returns 14 cards, including the 8 seeded founders), so this is a backend latency issue, not a seeding issue.", "affected_testIDs": ["discover-screen", "discover-card", "discover-like-button", "discover-pass-button"]},
+      {"flow": "Swipe right/left + match modal", "issue": "Blocked by the same 502 — no card ever renders so swipe gestures / like / pass buttons could not be invoked. api.swipe and match-modal code paths are unverified in this run.", "affected_testIDs": ["discover-like-button", "discover-pass-button", "match-modal"]}
+    ],
+    "design_issues": [
+      {"screen": "global (web preview)", "issues": [
+        "Console warning still present from iteration_2: '\"shadow*\" style props are deprecated. Use \"boxShadow\"' on almost every screen.",
+        "Console warning still present: 'props.pointerEvents is deprecated. Use style.pointerEvents' on TouchableOpacity interactions."
+      ]}
+    ],
+    "react_native_issues": [
+      {"component": "shadow* style props (deprecated)", "issue": "'shadow*' style props are deprecated in RN 0.75+/react-native-web; migrate to boxShadow-compatible helpers. Reference: /app/frontend/src/theme/index.ts (theme.shadow.*) applied across welcome/register/onboarding/tabs layout."},
+      {"component": "props.pointerEvents (deprecated)", "issue": "props.pointerEvents on TouchableOpacity/Pressable is deprecated. Move to style.pointerEvents. Reference: react-native-web warnings on auth screens."}
+    ]
+  },
+  "test_report_links": [
+    "/tmp/t1_welcome.png",
+    "/tmp/discover_loaded.png",
+    "/tmp/after_like.png",
+    "/tmp/after_pass.png",
+    "/tmp/projects_tab.png"
+  ],
+  "action_items": [
+    "CRITICAL: Speed up GET /api/discovery/cards. Fan out per-card AI compatibility calls with asyncio.gather and/or cache results in Mongo keyed by (user_a_id, user_b_id). Aim for <5s end-to-end so it doesn't hit the 60s ingress timeout. Reference: /app/backend/server.py:292 get_discovery_cards.",
+    "HIGH: In /app/frontend/app/(tabs)/discover.tsx:72-83 differentiate the API-error state from the 'no cards left' empty state. On 502/timeout, show a 'Something went wrong — Retry' UI instead of 'You're all caught up'.",
+    "Consider fetching card explanations lazily (only for the card currently on top of the stack) so first paint of Discover is near-instant.",
+    "Migrate theme.shadow.* helpers to a boxShadow-compatible form to silence RN-web deprecation warnings. Reference: /app/frontend/src/theme/index.ts:140-168.",
+    "Replace deprecated pointerEvents prop on Touchable/Pressable with style.pointerEvents.",
+    "Pin passlib/bcrypt versions to silence '(trapped) error reading bcrypt version' warning on backend startup."
+  ],
+  "critical_code_review_comments": [
+    "discover.tsx: setLoading(false) on error with empty cards masks real backend failures as a normal empty state — impacts observability and user recovery.",
+    "server.py get_discovery_cards: appears to compute AI explanations serially per card. This should be asyncio.gather'd and/or cached.",
+    "onboarding/index.tsx is still 973 lines (>700). Split each step into its own file for maintainability (flagged in iteration_2 as well).",
+    "Loading UI in discover.tsx has no client-side timeout — a hung backend leaves the user stuck on 'Curating profiles for you...' indefinitely."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (frontend-only test, but 1 critical backend endpoint 502'd repeatedly)", "frontend": "60% (register, all 6 onboarding steps, tab bar layout & new Briefcase icon verified. Discover card visuals, swipe actions and match modal blocked by backend 502.)"},
+  "seed_data_creation": "Created ephemeral test users disctest_<ts>@test.com and disc3_<ts>@test.com / disc4_<ts>@test.com (password test123) with full onboarding (France/Paris, English, Developer, React, Senior, Full time, Bootstrap only, SaaS, Remote, Bootstrap, bio 'Building.'). Seeded founder profiles (Sarah Chen, Marcus Reid, Elena Rossi, David Kim, Aisha Patel, Thomas Weber, Sofia Martins, James Okoye) were VERIFIED PRESENT via direct curl of /api/discovery/cards (14 cards returned including all 8 seeds).",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Once main agent parallelizes / caches /api/discovery/cards so it responds in <10s, re-run the same flow: register -> 6-step onboarding -> Discover. Then validate: (a) card renders with full-bleed image + gradient scrim + 'SWIPE TO CONNECT' eyebrow + 'AI Curated' badge + compatibility % + name/age/location + skills chips + AI explanation, (b) tapping [data-testid='discover-like-button'] animates card off and reveals next card, (c) tapping [data-testid='discover-pass-button'] does the same to the left, (d) at least one mutual like triggers [data-testid='match-modal']. Correct testIDs already discovered: register-name-input/email-input/password-input/submit-button (NOT register-name), onboarding-country/city/language/skill/bio-input, profession-<kebab>, onboarding-next-button, discover-card/like-button/pass-button/empty/screen, discover-reload. Onboarding chip labels use exact text match: 'Senior', 'Full time', 'Bootstrap only' (budget), 'SaaS', 'Remote', 'Bootstrap' (values).",
+  "rca_of_issue": "Discover swipe deck not visually testable because /api/discovery/cards is too slow. Repro: curl -m 60 https://<host>/api/discovery/cards?limit=20 -H 'Authorization: Bearer <token>' takes ~16s per call for a user with 14 candidates. In the browser through the K8s ingress the request times out at 60s and returns 502. Root cause: get_discovery_cards() in /app/backend/server.py:292 appears to compute an AI-generated compatibility explanation for every candidate synchronously (each ~1-3s LLM call). Mitigation: (1) fan out with asyncio.gather so all N calls run in parallel; (2) cache compatibility per user-pair in Mongo and only compute for new pairs; (3) return cards with score-only first and stream explanations lazily. Frontend-side mitigation: add a client-side timeout (~15s) and show a Retry state instead of the misleading 'You're all caught up' empty state on error."
+}
