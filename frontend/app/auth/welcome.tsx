@@ -1,17 +1,25 @@
 /**
- * Welcome Screen
+ * Welcome Screen - Cinematic entry point
  */
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ImageBackground, StatusBar, Platform } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import * as Haptics from 'expo-haptics';
+import { Mail, ArrowRight } from 'lucide-react-native';
 import { useAuth } from '@/src/contexts/AuthContext';
+import { theme } from '@/src/theme';
 
 export default function WelcomeScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { signInWithGoogle } = useAuth();
 
   const handleGoogleSignIn = async () => {
+    if (Platform.OS !== 'web') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    }
     try {
       await signInWithGoogle();
     } catch (error) {
@@ -19,134 +27,188 @@ export default function WelcomeScreen() {
     }
   };
 
+  const handleEmailSignUp = () => {
+    if (Platform.OS !== 'web') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    router.push('/auth/register');
+  };
+
+  const handleLogin = () => {
+    if (Platform.OS !== 'web') {
+      Haptics.selectionAsync();
+    }
+    router.push('/auth/login');
+  };
+
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.content}>
-        <View style={styles.header}>
-          <Ionicons name="people" size={80} color="#6B46C1" />
-          <Text style={styles.title}>CoFound</Text>
-          <Text style={styles.subtitle}>Find your perfect business partner</Text>
-        </View>
-
-        <View style={styles.buttonContainer}>
-          <TouchableOpacity
-            style={[styles.button, styles.googleButton]}
-            onPress={handleGoogleSignIn}
-          >
-            <Ionicons name="logo-google" size={24} color="#fff" style={{ marginRight: 12 }} />
-            <Text style={styles.googleButtonText}>Continue with Google</Text>
-          </TouchableOpacity>
-
-          <View style={styles.divider}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>OR</Text>
-            <View style={styles.dividerLine} />
+    <View style={styles.container} testID="welcome-screen">
+      <StatusBar barStyle="light-content" backgroundColor={theme.colors.surface} />
+      
+      <ImageBackground
+        source={{ uri: 'https://images.unsplash.com/photo-1637775297458-7443ffd545b2?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAxODF8MHwxfHNlYXJjaHwyfHxhYnN0cmFjdCUyMGRhcmslMjBsdXh1cnklMjBnZW9tZXRyaWMlMjB0ZXh0dXJlJTIwYmFja2dyb3VuZHxlbnwwfHx8fDE3ODUzMjcyNDh8MA&ixlib=rb-4.1.0&q=85' }}
+        style={styles.backgroundImage}
+        resizeMode="cover"
+      >
+        <LinearGradient
+          colors={['rgba(9,9,11,0.4)', 'rgba(9,9,11,0.75)', 'rgba(9,9,11,0.95)']}
+          locations={[0, 0.55, 1]}
+          style={StyleSheet.absoluteFillObject}
+        />
+        
+        <View style={[styles.content, { paddingTop: insets.top + theme.spacing.xxl, paddingBottom: insets.bottom + theme.spacing.xl }]}>
+          <View style={styles.headerSection}>
+            <View style={styles.brandMark}>
+              <View style={styles.brandDot} />
+              <Text style={styles.brandName}>COFOUND</Text>
+            </View>
           </View>
 
-          <TouchableOpacity
-            style={[styles.button, styles.emailButton]}
-            onPress={() => router.push('/auth/register')}
-          >
-            <Ionicons name="mail" size={24} color="#6B46C1" style={{ marginRight: 12 }} />
-            <Text style={styles.emailButtonText}>Sign up with Email</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.loginLink}
-            onPress={() => router.push('/auth/login')}
-          >
-            <Text style={styles.loginLinkText}>
-              Already have an account? <Text style={styles.loginLinkBold}>Log in</Text>
+          <View style={styles.heroSection}>
+            <Text style={styles.headline}>
+              Meet the person{'\n'}you'll build{'\n'}your next{'\n'}
+              <Text style={styles.headlineAccent}>company</Text> with.
             </Text>
-          </TouchableOpacity>
+            <Text style={styles.subheadline}>
+              An AI-powered matching engine for founders, operators, and visionaries.
+            </Text>
+          </View>
+
+          <View style={styles.actionsSection}>
+            <TouchableOpacity
+              style={styles.primaryButton}
+              onPress={handleGoogleSignIn}
+              activeOpacity={0.85}
+              testID="welcome-google-button"
+            >
+              <Text style={styles.primaryButtonText}>Continue with Google</Text>
+              <ArrowRight size={18} color={theme.colors.brandOn} strokeWidth={2.5} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              onPress={handleEmailSignUp}
+              activeOpacity={0.7}
+              testID="welcome-email-button"
+            >
+              <Mail size={18} color={theme.colors.text} strokeWidth={1.75} />
+              <Text style={styles.secondaryButtonText}>Sign up with Email</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.loginLink}
+              onPress={handleLogin}
+              activeOpacity={0.6}
+              testID="welcome-login-link"
+            >
+              <Text style={styles.loginText}>
+                Already have an account? <Text style={styles.loginTextBold}>Log in</Text>
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
-      </View>
-    </SafeAreaView>
+      </ImageBackground>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: theme.colors.surface,
+  },
+  backgroundImage: {
+    flex: 1,
   },
   content: {
     flex: 1,
-    padding: 24,
+    paddingHorizontal: theme.spacing.xl,
     justifyContent: 'space-between',
   },
-  header: {
-    flex: 1,
-    justifyContent: 'center',
+  headerSection: {
+    alignItems: 'flex-start',
+  },
+  brandMark: {
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: theme.spacing.sm,
   },
-  title: {
-    fontSize: 48,
-    fontWeight: 'bold',
-    color: '#6B46C1',
-    marginTop: 24,
+  brandDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: theme.colors.brand,
   },
-  subtitle: {
-    fontSize: 18,
-    color: '#666',
-    marginTop: 8,
-    textAlign: 'center',
+  brandName: {
+    ...theme.typography.micro,
+    color: theme.colors.text,
+    letterSpacing: 3,
   },
-  buttonContainer: {
-    width: '100%',
+  heroSection: {
+    marginTop: theme.spacing.xxl,
   },
-  button: {
+  headline: {
+    ...theme.typography.displayLarge,
+    color: theme.colors.text,
+    fontSize: 44,
+    lineHeight: 50,
+  },
+  headlineAccent: {
+    color: theme.colors.brand,
+    fontStyle: 'italic',
+    fontWeight: '400',
+  },
+  subheadline: {
+    ...theme.typography.body,
+    color: theme.colors.textSecondary,
+    marginTop: theme.spacing.lg,
+    maxWidth: 320,
+  },
+  actionsSection: {
+    gap: theme.spacing.md,
+  },
+  primaryButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 16,
-    borderRadius: 12,
-    marginBottom: 16,
+    backgroundColor: theme.colors.brand,
+    paddingVertical: 18,
+    paddingHorizontal: theme.spacing.xl,
+    borderRadius: theme.radius.pill,
+    gap: theme.spacing.sm,
+    ...theme.shadow.goldGlow,
   },
-  googleButton: {
-    backgroundColor: '#6B46C1',
+  primaryButtonText: {
+    ...theme.typography.headline,
+    color: theme.colors.brandOn,
   },
-  googleButtonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  emailButton: {
-    backgroundColor: '#F7FAFC',
-    borderWidth: 2,
-    borderColor: '#6B46C1',
-  },
-  emailButtonText: {
-    color: '#6B46C1',
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  divider: {
+  secondaryButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginVertical: 24,
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    paddingVertical: 17,
+    paddingHorizontal: theme.spacing.xl,
+    borderRadius: theme.radius.pill,
+    gap: theme.spacing.sm,
   },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: '#E2E8F0',
-  },
-  dividerText: {
-    marginHorizontal: 16,
-    color: '#A0AEC0',
-    fontSize: 14,
-    fontWeight: '600',
+  secondaryButtonText: {
+    ...theme.typography.headline,
+    color: theme.colors.text,
   },
   loginLink: {
     alignItems: 'center',
-    marginTop: 16,
+    paddingVertical: theme.spacing.md,
+    marginTop: theme.spacing.xs,
   },
-  loginLinkText: {
-    fontSize: 16,
-    color: '#666',
+  loginText: {
+    ...theme.typography.subhead,
+    color: theme.colors.textSecondary,
   },
-  loginLinkBold: {
-    color: '#6B46C1',
-    fontWeight: '600',
+  loginTextBold: {
+    color: theme.colors.brand,
+    fontWeight: '500',
   },
 });

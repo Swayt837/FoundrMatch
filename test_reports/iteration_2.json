@@ -1,0 +1,58 @@
+{
+  "summary": "Frontend-only E2E test of the NEW premium 'Glass/Luxe' redesign on mobile viewport (390x844). Full flow Register (premium_test_<ts>@test.com / Sarah Chen) -> 6-step Onboarding -> Discover -> all 5 tabs -> Chat screen validated end-to-end. 9/10 tests PASSED. Premium dark + antique-gold aesthetic renders correctly on Welcome, Register, Login, all 6 onboarding steps, Matches empty state, AI Copilot with 4 suggested prompts, Projects (with seeded 'SaaS Platform for Entrepreneurs' + gold '+' FAB), Profile (hero image, Level 1 badge, stats grid, 5-item verification list, gold Upgrade to Premium CTA, Log out), and Chat (avatar, 'Active now', phone/video icons, empty state, message input with gold send button). Bottom tab bar shows 5 tabs (Discover, Matches, AI Copilot, Projects, Profile) with gold-on-active + blur styling. No purple/blue detected. No red-screen errors. Only one gap: Discover swipe deck header ('SWIPE TO CONNECT' eyebrow + 'AI Curated' badge) could not be verified because the DB profile pool was empty for the fresh test user (empty state 'You're all caught up' rendered instead). Also detected a transient 401 on GET /api/discover right after a hard reload — likely token-restore race — but app handled it gracefully by rendering empty state. Deprecated-props console warnings ('shadow*' and 'props.pointerEvents') from react-native-web still present (already flagged in iteration_1).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/discover", "issue": "Returns 401 for a brief moment after a hard page reload — token from AsyncStorage isn't restored before initial fetch. UI recovers by showing the 'You're all caught up' empty state but no retry is triggered once AuthContext restores. Consider gating API calls until auth state is hydrated or retrying on 401."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Discover swipe deck for new users", "issue": "For a freshly-registered account the profile pool is empty, so 'SWIPE TO CONNECT' eyebrow and 'AI Curated' badge (specified in the design) never render — only the empty-state screen. Need seed users in the DB to validate the swipe-card layout (full-bleed image, gradient scrim, compatibility badge, gold like button, X pass button, swipe gestures).", "affected_testIDs": ["discover-screen"]}
+    ],
+    "design_issues": [
+      {"screen": "global (web preview)", "issues": [
+        "Console warnings: '\"shadow*\" style props are deprecated. Use \"boxShadow\"' — repeated on nearly every screen (Welcome, Register, Onboarding CTA, tab bar, profile stats). Migrate theme.shadow.* helpers to boxShadow-compatible form for RN 0.75+ web target.",
+        "Console warning: 'props.pointerEvents is deprecated. Use style.pointerEvents' — triggered on register button interactions."
+      ]}
+    ],
+    "react_native_issues": [
+      {"component": "shadow* style props", "issue": "'shadow*' style props are deprecated. Use 'boxShadow'. Reference: /app/frontend/src/theme/index.ts:140-168 (subtle/medium/strong/goldGlow) applied across welcome.tsx:179, register.tsx:247, onboarding/index.tsx:963, (tabs)/_layout.tsx and others."},
+      {"component": "props.pointerEvents", "issue": "props.pointerEvents is deprecated. Use style.pointerEvents. Reference: react-native-web warning fired on TouchableOpacity/Pressable interactions across auth screens."}
+    ]
+  },
+  "test_report_links": [
+    "/tmp/t1_welcome.png",
+    "/tmp/t2_register.png",
+    "/tmp/t3_onb_step1.png",
+    "/tmp/t3_onb_step6.png",
+    "/tmp/t_discover_final.png",
+    "/tmp/t_matches.png",
+    "/tmp/t_chat.png",
+    "/tmp/t6_assistant.png",
+    "/tmp/t7_projects.png",
+    "/tmp/t9_profile.png"
+  ],
+  "action_items": [
+    "Seed 5-10 dummy founder profiles in MongoDB so the Discover swipe deck (full-bleed image, gradient scrim, compatibility badge, gold like/X buttons, 'SWIPE TO CONNECT' eyebrow, 'AI Curated' badge) can be visually validated for new accounts.",
+    "Gate initial /api/discover fetch until AuthContext finishes hydrating token from AsyncStorage (or auto-retry on 401 once user object becomes available) to avoid the transient 401 on page reload.",
+    "Migrate theme.shadow.* helpers in /app/frontend/src/theme/index.ts:140-168 from shadowColor/shadowOffset/shadowOpacity/shadowRadius to a boxShadow-compatible pattern to silence RN-web deprecation warnings.",
+    "Replace deprecated `pointerEvents` prop on Touchable/Pressable components with `style={{ pointerEvents: ... }}`.",
+    "(Reminder from iteration_1) register.tsx / login.tsx still use Alert.alert for client-side validation which doesn't display on web — consider window.alert on web for the validation branches too (currently only error branch is handled)."
+  ],
+  "critical_code_review_comments": [
+    "onboarding/index.tsx (973 lines) is over the 700-line file-size guideline. Consider extracting each step into its own file (Step1Location.tsx, Step2Profession.tsx, ...) and keeping index.tsx as the state/router container.",
+    "onboarding/index.tsx:253 uses `router.replace('/(tabs)/discover')` which relies on the group route path; using `router.replace('/discover')` (as elsewhere) would be more consistent.",
+    "onboarding/index.tsx:162 uses `ImagePicker.MediaTypeOptions.Images` which was deprecated in expo-image-picker 15+ in favor of `['images']` mediaTypes array. Not blocking on web but will warn on native.",
+    "(tabs)/_layout.tsx: Projects tab icon is `MessageCircle` — semantically a chat icon; consider `Briefcase` or `Layers` to better match 'Projects/Opportunities' meaning.",
+    "Discover screen empty-state rendering after a 401 hides an auth issue as a 'no profiles' UI — degrades observability. Show a differentiated retry state when the API returns 401 vs. 200 with empty list."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (frontend-only test)", "frontend": "90% (9/10 flows fully validated; Discover swipe card visuals blocked by empty seed data)"},
+  "seed_data_creation": "Created one ephemeral test account premium_test_<timestamp>@test.com / test123 / Sarah Chen with full onboarding data (France/Paris, age 28, Developer, React skill, Senior, Full time, Bootstrap only, SaaS objective, Remote, Bootstrap value, bio 'Building the next great SaaS.'). No cleanup performed.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Redesign is visually solid on all screens. Next testing pass should focus on: (1) Discover swipe card visuals (needs seeded profile pool), (2) Match celebration modal (blur overlay) — needs 2 users mutually liking to trigger, (3) End-to-end chat message send/receive with a real matched pair, (4) AI Copilot placeholder response after tapping a suggested prompt (main agent notes this is a PLACEHOLDER — not wired to streaming). testIDs used: welcome-screen, welcome-google-button, welcome-email-button, welcome-login-link, register-screen/name/email/password/submit-button/error, onboarding-screen, onboarding-step-1..6, onboarding-country/city/age/language/skill/bio-input, onboarding-next-button, onboarding-add-photo, onboarding-error, profession-developer (and other kebab-cased profession IDs). Chat screen uses route /chat/[matchId].",
+  "rca_of_issue": "Discover empty state after page reload: transient 401 on /api/discover because the discover screen's useEffect fires before AuthContext finishes hydrating the JWT from AsyncStorage. The 401 branch is caught in the load-cards handler and swallowed, leaving the app in the empty state without a retry once the token becomes available. Deterministic fix: gate the fetch on `user !== null` in the discover useEffect, or add a retry-on-401 that awaits `refreshUser()` before failing."
+}

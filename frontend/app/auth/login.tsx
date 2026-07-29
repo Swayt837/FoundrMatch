@@ -1,5 +1,5 @@
 /**
- * Login Screen
+ * Login Screen - Premium dark aesthetic
  */
 import React, { useState } from 'react';
 import {
@@ -11,12 +11,14 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  SafeAreaView,
-  Alert,
+  ActivityIndicator,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
+import { ArrowLeft } from 'lucide-react-native';
+import * as Haptics from 'expo-haptics';
 import { useAuth } from '@/src/contexts/AuthContext';
+import { theme } from '@/src/theme';
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -24,88 +26,112 @@ export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const showError = (msg: string) => {
+    setError(msg);
+    if (Platform.OS !== 'web') {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    }
+  };
 
   const handleLogin = async () => {
+    setError('');
+    
     if (!email || !password) {
-      const msg = 'Please fill in all fields';
-      if (Platform.OS === 'web') {
-        window.alert(`Error: ${msg}`);
-      } else {
-        Alert.alert('Error', msg);
-      }
+      showError('Please fill in all fields');
       return;
     }
 
     setLoading(true);
     try {
-      await signIn(email, password);
-      // Redirect to index which will route based on auth state
-      router.replace('/');
-    } catch (error: any) {
-      const msg = error.message || 'Login failed';
-      if (Platform.OS === 'web') {
-        window.alert(`Error: ${msg}`);
-      } else {
-        Alert.alert('Error', msg);
+      if (Platform.OS !== 'web') {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       }
+      await signIn(email, password);
+      router.replace('/');
+    } catch (err: any) {
+      showError(err.message || 'Login failed');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']} testID="login-screen">
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardView}
       >
-        <ScrollView contentContainerStyle={styles.scrollContent}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
           <TouchableOpacity
             style={styles.backButton}
             onPress={() => router.back()}
+            testID="login-back-button"
           >
-            <Ionicons name="arrow-back" size={24} color="#333" />
+            <ArrowLeft size={22} color={theme.colors.text} strokeWidth={1.75} />
           </TouchableOpacity>
 
           <View style={styles.header}>
-            <Text style={styles.title}>Welcome Back</Text>
-            <Text style={styles.subtitle}>Log in to your account</Text>
+            <Text style={styles.eyebrow}>WELCOME BACK</Text>
+            <Text style={styles.title}>Log in to{'\n'}CoFound</Text>
+            <Text style={styles.subtitle}>
+              Continue your journey with your next partner.
+            </Text>
           </View>
 
           <View style={styles.form}>
-            <View style={styles.inputContainer}>
+            <View style={styles.inputGroup}>
               <Text style={styles.label}>Email</Text>
               <TextInput
                 style={styles.input}
-                placeholder="your@email.com"
+                placeholder="sarah@company.com"
+                placeholderTextColor={theme.colors.textSecondary}
                 value={email}
                 onChangeText={setEmail}
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoCorrect={false}
+                testID="login-email-input"
               />
             </View>
 
-            <View style={styles.inputContainer}>
+            <View style={styles.inputGroup}>
               <Text style={styles.label}>Password</Text>
               <TextInput
                 style={styles.input}
                 placeholder="Enter your password"
+                placeholderTextColor={theme.colors.textSecondary}
                 value={password}
                 onChangeText={setPassword}
                 secureTextEntry
                 autoCapitalize="none"
+                testID="login-password-input"
               />
             </View>
+
+            {error ? (
+              <View style={styles.errorContainer} testID="login-error">
+                <Text style={styles.errorText}>{error}</Text>
+              </View>
+            ) : null}
 
             <TouchableOpacity
               style={[styles.button, loading && styles.buttonDisabled]}
               onPress={handleLogin}
               disabled={loading}
+              activeOpacity={0.85}
+              testID="login-submit-button"
             >
-              <Text style={styles.buttonText}>
-                {loading ? 'Logging in...' : 'Log In'}
-              </Text>
+              {loading ? (
+                <ActivityIndicator color={theme.colors.brandOn} />
+              ) : (
+                <Text style={styles.buttonText}>Log in</Text>
+              )}
             </TouchableOpacity>
           </View>
         </ScrollView>
@@ -117,65 +143,84 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: theme.colors.surface,
   },
   keyboardView: {
     flex: 1,
   },
   scrollContent: {
     flexGrow: 1,
-    padding: 24,
+    paddingHorizontal: theme.spacing.xl,
+    paddingBottom: theme.spacing.xl,
   },
   backButton: {
-    marginBottom: 24,
+    width: 44,
+    height: 44,
+    justifyContent: 'center',
+    marginTop: theme.spacing.sm,
+    marginLeft: -theme.spacing.md,
   },
   header: {
-    marginBottom: 32,
+    marginTop: theme.spacing.xl,
+    marginBottom: theme.spacing.xxl,
+  },
+  eyebrow: {
+    ...theme.typography.micro,
+    color: theme.colors.brand,
+    marginBottom: theme.spacing.md,
   },
   title: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 8,
+    ...theme.typography.display,
+    color: theme.colors.text,
+    marginBottom: theme.spacing.md,
   },
   subtitle: {
-    fontSize: 16,
-    color: '#666',
+    ...theme.typography.body,
+    color: theme.colors.textSecondary,
   },
   form: {
-    flex: 1,
+    gap: theme.spacing.lg,
   },
-  inputContainer: {
-    marginBottom: 20,
+  inputGroup: {
+    gap: theme.spacing.sm,
   },
   label: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 8,
+    ...theme.typography.footnote,
+    color: theme.colors.textSecondary,
+    fontWeight: '500',
   },
   input: {
+    ...theme.typography.body,
+    color: theme.colors.text,
+    backgroundColor: theme.colors.surfaceSecondary,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
-    borderRadius: 12,
-    paddingHorizontal: 16,
+    borderColor: theme.colors.border,
+    borderRadius: theme.radius.md,
+    paddingHorizontal: theme.spacing.lg,
     paddingVertical: 14,
-    fontSize: 16,
-    backgroundColor: '#F7FAFC',
+  },
+  errorContainer: {
+    backgroundColor: theme.colors.error,
+    padding: theme.spacing.md,
+    borderRadius: theme.radius.md,
+  },
+  errorText: {
+    ...theme.typography.subhead,
+    color: theme.colors.errorOn,
   },
   button: {
-    backgroundColor: '#6B46C1',
-    paddingVertical: 16,
-    borderRadius: 12,
+    backgroundColor: theme.colors.brand,
+    paddingVertical: 18,
+    borderRadius: theme.radius.pill,
     alignItems: 'center',
-    marginTop: 24,
+    marginTop: theme.spacing.md,
+    ...theme.shadow.goldGlow,
   },
   buttonDisabled: {
     opacity: 0.6,
   },
   buttonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
+    ...theme.typography.headline,
+    color: theme.colors.brandOn,
   },
 });
