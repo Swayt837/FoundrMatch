@@ -6,6 +6,12 @@ import { storage } from '@/src/utils/storage';
 
 const API_URL = Constants.expoConfig?.extra?.EXPO_PUBLIC_BACKEND_URL || process.env.EXPO_PUBLIC_BACKEND_URL;
 
+let unauthorizedHandler: (() => void) | null = null;
+
+export function setUnauthorizedHandler(handler: () => void) {
+  unauthorizedHandler = handler;
+}
+
 class APIClient {
   private baseURL: string;
 
@@ -42,6 +48,7 @@ class APIClient {
     if (response.status === 401) {
       // Token expired or invalid
       await storage.secureRemove('auth_token');
+      if (unauthorizedHandler) unauthorizedHandler();
       throw new Error('Unauthorized');
     }
 

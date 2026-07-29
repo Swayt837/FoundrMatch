@@ -7,7 +7,7 @@ import * as WebBrowser from 'expo-web-browser';
 import * as Linking from 'expo-linking';
 import { Platform } from 'react-native';
 import { storage } from '@/src/utils/storage';
-import { api } from '@/src/api/client';
+import { api, setUnauthorizedHandler } from '@/src/api/client';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -35,6 +35,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Setup 401 handler to force logout + redirect
+    setUnauthorizedHandler(() => {
+      setUser(null);
+    });
+    
     // Check for existing session on mount
     checkExistingSession();
     

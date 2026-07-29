@@ -3,12 +3,20 @@
  */
 import React from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
-import { Tabs } from 'expo-router';
+import { Tabs, Redirect } from 'expo-router';
 import { BlurView } from 'expo-blur';
 import { Compass, Heart, Briefcase, Sparkles, User } from 'lucide-react-native';
+import { useAuth } from '@/src/contexts/AuthContext';
 import { theme } from '@/src/theme';
 
 export default function TabsLayout() {
+  const { user, loading } = useAuth();
+
+  // Redirect to welcome if not authenticated
+  if (!loading && !user) {
+    return <Redirect href="/auth/welcome" />;
+  }
+
   return (
     <Tabs
       screenOptions={{
