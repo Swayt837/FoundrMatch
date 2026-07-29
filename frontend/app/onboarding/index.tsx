@@ -128,7 +128,7 @@ export default function OnboardingScreen() {
                 <Text style={styles.label}>Country *</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder=\"United States\"
+                  placeholder="United States"
                   value={country}
                   onChangeText={setCountry}
                 />
@@ -138,7 +138,7 @@ export default function OnboardingScreen() {
                 <Text style={styles.label}>City *</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder=\"San Francisco\"
+                  placeholder="San Francisco"
                   value={city}
                   onChangeText={setCity}
                 />
@@ -148,7 +148,7 @@ export default function OnboardingScreen() {
                 <Text style={styles.label}>Languages (comma separated)</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder=\"English, French\"
+                  placeholder="English, French"
                   value={languages}
                   onChangeText={setLanguages}
                 />
@@ -158,10 +158,10 @@ export default function OnboardingScreen() {
                 <Text style={styles.label}>Age (optional)</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder=\"30\"
+                  placeholder="30"
                   value={age}
                   onChangeText={setAge}
-                  keyboardType=\"numeric\"
+                  keyboardType="numeric"
                 />
               </View>
             </View>
@@ -190,7 +190,7 @@ export default function OnboardingScreen() {
                 <Text style={styles.label}>Skills * (comma separated)</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder=\"React, Node.js, Python\"
+                  placeholder="React, Node.js, Python"
                   value={skills}
                   onChangeText={setSkills}
                   multiline
@@ -218,7 +218,7 @@ export default function OnboardingScreen() {
                 <Text style={styles.label}>Objectives (comma separated)</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder=\"Build a SaaS, Create a startup\"
+                  placeholder="Build a SaaS, Create a startup"
                   value={objectives}
                   onChangeText={setObjectives}
                   multiline
@@ -229,7 +229,7 @@ export default function OnboardingScreen() {
                 <Text style={styles.label}>Bio</Text>
                 <TextInput
                   style={[styles.input, styles.textArea]}
-                  placeholder=\"Tell us about yourself...\"
+                  placeholder="Tell us about yourself..."
                   value={bio}
                   onChangeText={setBio}
                   multiline
