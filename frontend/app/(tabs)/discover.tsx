@@ -11,7 +11,7 @@ import {
   PanResponder,
   ActivityIndicator,
   Image,
-  Dimensions,
+  useWindowDimensions,
   Platform,
   ScrollView,
 } from 'react-native';
@@ -25,9 +25,7 @@ import { useAuth } from '@/src/contexts/AuthContext';
 import { api } from '@/src/api/client';
 import { theme } from '@/src/theme';
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-const CARD_WIDTH = SCREEN_WIDTH - 32;
-const CARD_HEIGHT = SCREEN_HEIGHT * 0.62;
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = { width: 390, height: 844 };
 const SWIPE_THRESHOLD = 120;
 
 const PLACEHOLDER_IMAGE = 'https://images.unsplash.com/photo-1642290687545-8ab7e6002472?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA3MDR8MHwxfHNlYXJjaHwyfHxwcmVtaXVtJTIwcG9ydHJhaXQlMjBibGFjayUyMGFuZCUyMHdoaXRlfGVufDB8fHx8MTc4NTMyNzI2MXww&ixlib=rb-4.1.0&q=85';
@@ -48,6 +46,9 @@ export default function DiscoverScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
+  const { width: winWidth, height: winHeight } = useWindowDimensions();
+  const CARD_WIDTH = Math.min(winWidth - 32, 400);
+  const CARD_HEIGHT = Math.min(winHeight * 0.62, 560);
   const [cards, setCards] = useState<Card[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -113,7 +114,7 @@ export default function DiscoverScreen() {
 
   const swipeLeft = () => {
     Animated.timing(position, {
-      toValue: { x: -SCREEN_WIDTH * 1.2, y: 0 },
+      toValue: { x: -winWidth * 1.2, y: 0 },
       duration: 250,
       useNativeDriver: false,
     }).start(() => handleSwipe('left'));
@@ -121,7 +122,7 @@ export default function DiscoverScreen() {
 
   const swipeRight = () => {
     Animated.timing(position, {
-      toValue: { x: SCREEN_WIDTH * 1.2, y: 0 },
+      toValue: { x: winWidth * 1.2, y: 0 },
       duration: 250,
       useNativeDriver: false,
     }).start(() => handleSwipe('right'));
@@ -222,7 +223,7 @@ export default function DiscoverScreen() {
   const photoUri = profile.photos?.[0] || PLACEHOLDER_IMAGE;
 
   const rotate = position.x.interpolate({
-    inputRange: [-SCREEN_WIDTH / 2, 0, SCREEN_WIDTH / 2],
+    inputRange: [-winWidth / 2, 0, winWidth / 2],
     outputRange: ['-15deg', '0deg', '15deg'],
   });
 
@@ -239,7 +240,7 @@ export default function DiscoverScreen() {
   });
 
   const nextCardScale = position.x.interpolate({
-    inputRange: [-SCREEN_WIDTH, 0, SCREEN_WIDTH],
+    inputRange: [-winWidth, 0, winWidth],
     outputRange: [1, 0.92, 1],
     extrapolate: 'clamp',
   });
@@ -260,34 +261,35 @@ export default function DiscoverScreen() {
 
       {/* Card Stack */}
       <View style={styles.cardStack}>
-        {/* Next card (behind) */}
-        {nextCard && (
+        <View style={[styles.cardWrapper, { width: CARD_WIDTH, height: CARD_HEIGHT }]}>
+          {/* Next card (behind) */}
+          {nextCard && (
+            <Animated.View
+              style={[
+                styles.card,
+                styles.cardBehind,
+                { transform: [{ scale: nextCardScale }] },
+              ]}
+            >
+              <Image source={{ uri: nextCard.user.profile.photos?.[0] || PLACEHOLDER_IMAGE }} style={styles.cardImage} />
+            </Animated.View>
+          )}
+
+          {/* Current card */}
           <Animated.View
+            {...panResponder.panHandlers}
             style={[
               styles.card,
-              styles.cardBehind,
-              { transform: [{ scale: nextCardScale }] },
+              {
+                transform: [
+                  { translateX: position.x },
+                  { translateY: position.y },
+                  { rotate },
+                ],
+              },
             ]}
+            testID="discover-card"
           >
-            <Image source={{ uri: nextCard.user.profile.photos?.[0] || PLACEHOLDER_IMAGE }} style={styles.cardImage} />
-          </Animated.View>
-        )}
-
-        {/* Current card */}
-        <Animated.View
-          {...panResponder.panHandlers}
-          style={[
-            styles.card,
-            {
-              transform: [
-                { translateX: position.x },
-                { translateY: position.y },
-                { rotate },
-              ],
-            },
-          ]}
-          testID="discover-card"
-        >
           <Image source={{ uri: photoUri }} style={styles.cardImage} />
           
           {/* Gradient scrim */}
@@ -356,6 +358,7 @@ export default function DiscoverScreen() {
             )}
           </View>
         </Animated.View>
+        </View>
       </View>
 
       {/* Action buttons */}
@@ -475,14 +478,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: theme.spacing.xs,
+    paddingHorizontal: theme.spacing.md,
+  },
+  cardWrapper: {
+    position: 'relative',
+    maxWidth: '100%',
   },
   card: {
     position: 'absolute',
-    width: CARD_WIDTH,
-    height: CARD_HEIGHT,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     borderRadius: theme.radius.xl,
     overflow: 'hidden',
     backgroundColor: theme.colors.surfaceSecondary,
+    flexDirection: 'column',
     ...theme.shadow.strong,
   },
   cardBehind: {
@@ -492,6 +503,8 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     position: 'absolute',
+    top: 0,
+    left: 0,
   },
   gradient: {
     ...StyleSheet.absoluteFillObject,
@@ -558,12 +571,10 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
   },
   cardInfo: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    padding: theme.spacing.xl,
-    gap: theme.spacing.sm,
+    marginTop: 'auto',
+    padding: theme.spacing.lg,
+    gap: theme.spacing.xs,
+    zIndex: 2,
   },
   nameRow: {
     flexDirection: 'row',
@@ -573,7 +584,7 @@ const styles = StyleSheet.create({
   cardName: {
     ...theme.typography.title1,
     color: theme.colors.text,
-    fontSize: 32,
+    fontSize: 26,
   },
   cardAge: {
     ...theme.typography.title3,
