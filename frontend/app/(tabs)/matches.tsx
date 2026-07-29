@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { Zap, Heart, ChevronRight, Rocket } from 'lucide-react-native';
+import { Zap, Heart, ChevronRight, Rocket, Info } from 'lucide-react-native';
 import { api } from '@/src/api/client';
 import { theme } from '@/src/theme';
 
@@ -55,6 +55,10 @@ export default function MatchesScreen() {
     router.push(`/chat/${matchId}`);
   };
 
+  const goToProfile = (userId: string) => {
+    router.push(`/profile/${userId}`);
+  };
+
   const renderMatch = ({ item }: { item: any }) => {
     const user = item.user;
     const profile = user.profile;
@@ -69,10 +73,16 @@ export default function MatchesScreen() {
           activeOpacity={0.6}
           testID={`match-row-${item.match_id}`}
         >
-          <Image
-            source={{ uri: profile.photos?.[0] || PLACEHOLDER }}
-            style={styles.avatar}
-          />
+          <TouchableOpacity
+            onPress={() => goToProfile(user.user_id)}
+            activeOpacity={0.7}
+            testID={`match-avatar-${item.match_id}`}
+          >
+            <Image
+              source={{ uri: profile.photos?.[0] || PLACEHOLDER }}
+              style={styles.avatar}
+            />
+          </TouchableOpacity>
           <View style={styles.rowContent}>
             <View style={styles.rowTop}>
               <Text style={styles.rowName} numberOfLines={1}>{profile.name}</Text>
@@ -92,14 +102,24 @@ export default function MatchesScreen() {
           </View>
           <ChevronRight size={18} color={theme.colors.textSecondary} strokeWidth={1.5} />
         </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.dealRoomIconBtn}
-          onPress={() => router.push(`/deal-room/${item.match_id}`)}
-          testID={`match-dealroom-${item.match_id}`}
-        >
-          <Rocket size={14} color={theme.colors.brand} strokeWidth={1.75} />
-          <Text style={styles.dealRoomIconText}>Deal Room</Text>
-        </TouchableOpacity>
+        <View style={styles.matchActions}>
+          <TouchableOpacity
+            style={styles.matchActionBtn}
+            onPress={() => goToProfile(user.user_id)}
+            testID={`match-profile-${item.match_id}`}
+          >
+            <Info size={13} color={theme.colors.textSecondary} strokeWidth={1.75} />
+            <Text style={styles.matchActionText}>View profile</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.dealRoomIconBtn}
+            onPress={() => router.push(`/deal-room/${item.match_id}`)}
+            testID={`match-dealroom-${item.match_id}`}
+          >
+            <Rocket size={14} color={theme.colors.brand} strokeWidth={1.75} />
+            <Text style={styles.dealRoomIconText}>Deal Room</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   };
@@ -210,13 +230,34 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     alignItems: 'center',
     gap: 6,
-    marginLeft: 52 + theme.spacing.md,
     paddingHorizontal: theme.spacing.md,
     paddingVertical: 6,
     borderRadius: theme.radius.pill,
     backgroundColor: theme.colors.brandTertiary,
     borderWidth: 1,
     borderColor: 'rgba(212,175,55,0.3)',
+  },
+  matchActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.sm,
+    marginLeft: 52 + theme.spacing.md,
+  },
+  matchActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: 6,
+    borderRadius: theme.radius.pill,
+    backgroundColor: theme.colors.surfaceTertiary,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  matchActionText: {
+    ...theme.typography.caption,
+    color: theme.colors.textSecondary,
+    fontWeight: '500',
   },
   dealRoomIconText: {
     ...theme.typography.caption,

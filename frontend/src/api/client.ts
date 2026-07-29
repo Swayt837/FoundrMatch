@@ -200,6 +200,11 @@ class APIClient {
       body: JSON.stringify(data),
     });
   }
+
+  // Get another user's profile
+  async getUserProfile(userId: string) {
+    return this.request(`/profile/${userId}`);
+  }
 }
 
 export const api = new APIClient();

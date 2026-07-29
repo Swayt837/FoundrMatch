@@ -7,13 +7,14 @@ import {
   ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { Plus, Briefcase, Clock, TrendingUp, ChevronRight } from 'lucide-react-native';
 import { api } from '@/src/api/client';
 import { theme } from '@/src/theme';
 
 export default function ProjectsScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const [projects, setProjects] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -49,7 +50,12 @@ export default function ProjectsScreen() {
           <Text style={styles.eyebrow}>OPPORTUNITIES</Text>
           <Text style={styles.title}>Projects</Text>
         </View>
-        <TouchableOpacity style={styles.fab} testID="projects-create-button">
+        <TouchableOpacity
+          style={styles.fab}
+          onPress={() => router.push('/project/create')}
+          activeOpacity={0.85}
+          testID="projects-create-button"
+        >
           <Plus size={20} color={theme.colors.brandOn} strokeWidth={2.5} />
         </TouchableOpacity>
       </View>
@@ -75,7 +81,12 @@ export default function ProjectsScreen() {
               <Text style={styles.emptyText}>
                 Be the first to post a cofounder opportunity. Great teams start here.
               </Text>
-              <TouchableOpacity style={styles.postButton} testID="projects-post-empty">
+              <TouchableOpacity
+                style={styles.postButton}
+                onPress={() => router.push('/project/create')}
+                activeOpacity={0.85}
+                testID="projects-post-empty"
+              >
                 <Plus size={16} color={theme.colors.brandOn} strokeWidth={2} />
                 <Text style={styles.postButtonText}>Post an opportunity</Text>
               </TouchableOpacity>

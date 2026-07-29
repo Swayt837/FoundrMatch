@@ -58,6 +58,8 @@ export default function RootLayout() {
               <Stack.Screen name="chat/[matchId]" options={{ presentation: 'card' }} />
               <Stack.Screen name="deal-room/[matchId]" options={{ presentation: 'card' }} />
               <Stack.Screen name="profile/edit" options={{ presentation: 'modal' }} />
+              <Stack.Screen name="profile/[id]" options={{ presentation: 'card' }} />
+              <Stack.Screen name="project/create" options={{ presentation: 'modal' }} />
             </Stack>
           </AuthProvider>
         </QueryClientProvider>

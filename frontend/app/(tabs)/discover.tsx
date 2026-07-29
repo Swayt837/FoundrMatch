@@ -160,6 +160,11 @@ export default function DiscoverScreen() {
     router.push(`/chat/${matchId}`);
   };
 
+  const openProfileDetail = (userId: string) => {
+    haptic('light');
+    router.push(`/profile/${userId}`);
+  };
+
   if (loading) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
@@ -358,6 +363,21 @@ export default function DiscoverScreen() {
             )}
           </View>
         </Animated.View>
+
+        {/* View profile floating button - overlaid above card */}
+        <TouchableOpacity
+          style={styles.viewProfileBtn}
+          onPress={() => openProfileDetail(cardUser.user_id)}
+          activeOpacity={0.85}
+          testID="discover-view-profile"
+        >
+          <BlurView intensity={50} tint="dark" style={styles.viewProfileBlur}>
+            <View style={styles.viewProfileInner}>
+              <Info size={14} color={theme.colors.brand} strokeWidth={2} />
+              <Text style={styles.viewProfileText}>View profile</Text>
+            </View>
+          </BlurView>
+        </TouchableOpacity>
         </View>
       </View>
 
@@ -515,6 +535,35 @@ const styles = StyleSheet.create({
     right: theme.spacing.lg,
     borderRadius: theme.radius.pill,
     overflow: 'hidden',
+  },
+  viewProfileBtn: {
+    position: 'absolute',
+    top: theme.spacing.lg,
+    left: theme.spacing.lg,
+    borderRadius: theme.radius.pill,
+    overflow: 'hidden',
+    zIndex: 10,
+    elevation: 10,
+  },
+  viewProfileBlur: {
+    borderRadius: theme.radius.pill,
+    overflow: 'hidden',
+  },
+  viewProfileInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(212,175,55,0.3)',
+    borderRadius: theme.radius.pill,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+  },
+  viewProfileText: {
+    ...theme.typography.caption,
+    color: theme.colors.brand,
+    fontWeight: '600',
   },
   compatBadgeBlur: {
     borderRadius: theme.radius.pill,

@@ -1,0 +1,73 @@
+{
+  "summary": "Iteration 6: Backend 8/8 pytest PASS. Frontend flows: (a) 'Add Project' fab + empty-state 'Post an opportunity' both navigate to /project/create; (b) full create form fills+submits, POST /api/projects/create returns 200 and the new card appears at the top of the projects list; (c) Discover 'View profile' pill navigates to /profile/{userId} without triggering a swipe; (d) Matches 'View profile' pill AND avatar both navigate to /profile/{userId}; Deal Room pill still present. HOWEVER the profile detail screen (profile/[id].tsx) renders EMPTY — no name, no bio, no skills, no city — only the placeholder image, back button, and footer 'Profile viewed via CoFound' are visible. RCA: GET /api/profile/{user_id} returns the raw user document with fields nested under `profile` (data.profile.name/bio/city/skills/...), but the detail screen calls `setProfile(data)` and then reads `profile.name`, `profile.bio`, `profile.city`, etc. from the TOP LEVEL, so every conditional (`profile.bio ? ...`, `profile.skills?.length > 0 && ...`) evaluates to false and the entire body is skipped. Reference: /app/frontend/app/profile/[id].tsx:61-62. Trivial one-line fix in setProfile to normalize shape (see action_items). Also confirmed: deprecated RN-web warnings (shadow*, pointerEvents) still present — same as iteration 4/5.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "profile/[id].tsx",
+        "issue": "Profile detail screen renders NOTHING beyond the hero image because it reads profile fields from the top level of the API response, but backend nests them under `profile` key. All conditional sections (About, Skills, Objectives, Work style, Values, Budget, Languages, hero name/age/city/profession/availability) are skipped. Loading state completes fine, no error is thrown — just an empty screen. Reference: /app/frontend/app/profile/[id].tsx:61-62.",
+        "testID": "profile-detail-screen",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "GET /api/profile/{user_id} -> profile detail screen",
+        "issue": "Data-shape mismatch. Backend returns {user_id, email, profile: {name, bio, city, ...}, ...}. Frontend expects flat top-level fields. Fix: `setProfile({ user_id: data.user_id, ...(data.profile || {}) })`.",
+        "affected_testIDs": ["profile-detail-screen"]
+      }
+    ],
+    "design_issues": [
+      {"screen": "profile/[id]", "issues": [
+        "Since the body renders nothing until the shape is fixed, cannot fully audit design. Hero background image + back-button blur look correct. After fix, spot-check contrast of gold pill labels on gold background."
+      ]},
+      {"screen": "global (web preview)", "issues": [
+        "shadow* deprecation warning still present (RN 0.75+ / react-native-web).",
+        "props.pointerEvents deprecation warning still present on Touchable/Pressable."
+      ]}
+    ],
+    "react_native_issues": [
+      {"component": "shadow* style props (deprecated)", "issue": "'shadow*' style props deprecated in RN 0.75+/react-native-web. Reference: /app/frontend/src/theme/index.ts (theme.shadow.*)."},
+      {"component": "props.pointerEvents (deprecated)", "issue": "props.pointerEvents on TouchableOpacity/Pressable is deprecated. Move to style.pointerEvents."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration6_features.py",
+    "/app/test_reports/pytest/iteration_6.xml",
+    "/tmp/it6_01_after_login.png",
+    "/tmp/it6_02_projects_tab.png",
+    "/tmp/it6_03_create_screen.png",
+    "/tmp/it6_04_after_submit.png",
+    "/tmp/it6_05_discover.png",
+    "/tmp/it6_06_profile_detail.png",
+    "/tmp/it6_07_matches.png",
+    "/tmp/it6_08_match_profile.png"
+  ],
+  "action_items": [
+    "HIGH: Fix profile/[id].tsx line 62 to normalize the API response shape. Change `setProfile(data)` to `setProfile({ user_id: data.user_id, ...(data.profile || {}), ...data })` OR change the detail screen to read from `profile.profile?.name` etc. Recommended: normalize in the load() call so JSX stays clean. Without this fix the whole 'View profile' feature is functionally empty.",
+    "LOW: (carried over from iter 5) In AuthContext (or api/client.ts), on 401 clear the user state and route to /login.",
+    "LOW: Migrate theme.shadow.* helpers to boxShadow-compatible form to silence RN-web deprecation warning.",
+    "LOW: Replace deprecated props.pointerEvents with style.pointerEvents on Touchable/Pressable components."
+  ],
+  "critical_code_review_comments": [
+    "profile/[id].tsx assumes flat response but GET /api/profile/{user_id} returns the whole user doc with a nested `profile` sub-object. This is the root cause of the empty detail screen.",
+    "projects.tsx correctly navigates via useRouter().push('/project/create') from both entry points (fab + empty-state CTA). Good.",
+    "project/create.tsx calls api.createProject and then router.back() — matches expected UX and iteration 6 spec.",
+    "_layout.tsx correctly registers profile/[id] as card and project/create as modal.",
+    "api/client.ts getUserProfile() correctly hits /api/profile/{userId} (auth-gated).",
+    "discover-view-profile is placed as a sibling to the pannable Animated.View — confirmed by testing that tapping it does NOT initiate a swipe."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration6_features.py (new)",
+    "/app/test_reports/pytest/iteration_6.xml (generated)"
+  ],
+  "success_rate": {"backend": "100% (8/8 pytest)", "frontend": "80% (4/5 iteration-6 flows PASS; profile detail rendering is BROKEN due to data-shape mismatch)"},
+  "seed_data_creation": "Created one project via UI titled 'TEST UI Project X' (developer, 25h, 15% equity, React) and one via pytest ('TEST_Project_...'). Both are still in the projects list — safe to leave or clean up by deleting via DB.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "After main agent fixes profile/[id].tsx data-shape (single-line change in the load() function to unwrap `data.profile`), re-verify: (1) tap 'View profile' on Discover card -> profile detail shows Aisha Patel's name/age/city/profession/availability/bio/skills/objectives/work_style/values/languages. (2) Match row: both match-avatar-* and match-profile-* testIDs navigate to Designer User's detail page which should show name+profession+skills. (3) profile-detail-back testID returns to previous screen. All 8 backend pytest cases can be re-run with `pytest backend/tests/test_iteration6_features.py -v`. Login: test@cofound.com/test123. On the login page there is only ONE 'Log in' text element (unlike earlier iterations where there were two).",
+  "rca_of_issue": "Profile detail empty screen — Root cause: In /app/frontend/app/profile/[id].tsx `load()` (line 57-68), the code calls `const data = await api.getUserProfile(id)` and then `setProfile(data)`. The API (`GET /api/profile/{user_id}` in server.py:274) returns `find_one()` of the users collection which stores all display fields under a nested `profile: {name, bio, city, country, age, profession, skills, experience, availability, budget, objectives, work_style, values, languages, photos}` object. The detail screen reads them flat (`profile.name`, `profile.bio`, `profile.city`, etc.), so every field is `undefined` and every conditional guard (`profile.bio ? ...`, `profile.skills?.length > 0`) short-circuits to false. Reproduction: login, tap 'View profile' pill on Discover or Matches. Expected: full profile card. Actual: only background image + back button + 'Profile viewed via CoFound' footer. Fix (one-liner): `setProfile({ user_id: data.user_id, ...(data.profile || {}) });` — this hoists the nested fields to the top level while preserving user_id for any needed downstream use."
+}
