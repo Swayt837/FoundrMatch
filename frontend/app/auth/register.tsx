@@ -40,8 +40,15 @@ export default function RegisterScreen() {
     setLoading(true);
     try {
       await signUp(email, password, name);
+      // Redirect to index which will route based on auth state
+      router.replace('/');
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Registration failed');
+      const msg = error.message || 'Registration failed';
+      if (Platform.OS === 'web') {
+        window.alert(`Error: ${msg}`);
+      } else {
+        Alert.alert('Error', msg);
+      }
     } finally {
       setLoading(false);
     }

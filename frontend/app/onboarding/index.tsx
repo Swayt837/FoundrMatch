@@ -52,7 +52,11 @@ export default function OnboardingScreen() {
 
   const pickImage = async () => {
     if (photos.length >= 5) {
-      Alert.alert('Maximum photos', 'You can upload up to 5 photos');
+      if (Platform.OS === 'web') {
+        window.alert('Maximum photos: You can upload up to 5 photos');
+      } else {
+        Alert.alert('Maximum photos', 'You can upload up to 5 photos');
+      }
       return;
     }
 
@@ -71,7 +75,11 @@ export default function OnboardingScreen() {
 
   const handleComplete = async () => {
     if (!country || !city || !profession || !skills || !experience) {
-      Alert.alert('Error', 'Please fill in all required fields');
+      if (Platform.OS === 'web') {
+        window.alert('Error: Please fill in all required fields');
+      } else {
+        Alert.alert('Error', 'Please fill in all required fields');
+      }
       return;
     }
 
@@ -102,7 +110,12 @@ export default function OnboardingScreen() {
       await refreshUser();
       router.replace('/(tabs)/discover');
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Onboarding failed');
+      const msg = error.message || 'Onboarding failed';
+      if (Platform.OS === 'web') {
+        window.alert(`Error: ${msg}`);
+      } else {
+        Alert.alert('Error', msg);
+      }
     } finally {
       setLoading(false);
     }

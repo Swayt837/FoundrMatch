@@ -1,0 +1,33 @@
+{
+  "summary": "Frontend-only regression test for CoFound auth navigation bug fix on mobile viewport (390x844). All 4 critical tests PASSED: (1) Registration → redirects to Onboarding screen, (2) Login → redirects to Onboarding/Discover based on user state, (3) Full flow Register → Onboarding form fill → Discover tab works end-to-end, (4) Google Sign-In redirects to auth.emergentagent.com correctly. router.replace('/') fix confirmed working after signUp/signIn success. Network requests verified: POST /api/auth/register 200, POST /api/auth/login 200, GET /api/auth/me 200, POST /api/onboarding/complete 200.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "welcome/register/login", "issues": ["Console warnings: 'shadow*' style props are deprecated (use boxShadow); props.pointerEvents is deprecated (use style.pointerEvents). Non-blocking but should be cleaned up."]}
+    ],
+    "react_native_issues": [
+      {"component": "TouchableOpacity/Pressable pointerEvents", "issue": "props.pointerEvents is deprecated. Use style.pointerEvents. Reference: react-native-web deprecation warning triggered on button interactions across auth screens."},
+      {"component": "shadow* style props", "issue": "'shadow*' style props are deprecated. Use 'boxShadow'. Reference: appears on initial app render for React Native Web (RN 0.75+ deprecation)."}
+    ]
+  },
+  "test_report_links": ["/tmp/01_welcome.png", "/tmp/02_register_filled.png", "/tmp/03_after_register.png", "/tmp/04_after_login.png", "/tmp/onb_filled.png", "/tmp/after_onb.png"],
+  "action_items": [
+    "No functional action items — auth navigation fix verified working.",
+    "Optional cleanup: Migrate deprecated 'shadow*' styles to 'boxShadow' and 'pointerEvents' prop to style.pointerEvents to remove console warnings (react-native-web deprecations)."
+  ],
+  "critical_code_review_comments": [
+    "register.tsx line 31,36: Still uses Alert.alert (won't show on web) for client-side validation errors (missing fields, password<6). Only the API-error branch uses window.alert on web. Consider unifying to platform-aware alerts for validation too.",
+    "login.tsx line 30: Same issue — Alert.alert for empty-fields validation won't fire on web.",
+    "AuthContext.checkExistingSession: setLoading(false) is inside finally, correct. But if getMe fails after storing token from prior session, token is removed — good.",
+    "Success rate observation: full auth + onboarding + discover flow works cleanly with real backend integration."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (frontend-only test)", "frontend": "100% (4/4 critical flows passing)"},
+  "seed_data_creation": "Created ephemeral test users during registration flow (bugfix_<ts>@test.com, logintest_<ts>@test.com, onboard_<ts>@test.com). No cleanup performed — these are test-only accounts.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Auth navigation bug fix verified end-to-end on mobile web preview. Register → Onboarding → Discover works. Login → routes correctly based on onboarding_completed flag. Google Sign-In redirects to https://auth.emergentagent.com/?redirect=<origin>/ as expected. Note: React Native TextInput with multiline=true renders as <textarea> in web; use textarea[placeholder=...] selector for Skills/Objectives/Bio fields on the onboarding screen.",
+  "rca_of_issue": "Original bug: after successful register/login API call (200 OK), user remained on the auth screen because AuthContext only updated user state but never triggered navigation. Fix (verified): register.tsx and login.tsx now call router.replace('/') after signUp/signIn success — the index.tsx redirects based on user + onboarding_completed. Additionally, Alert.alert was replaced with window.alert on web for error branches. All confirmed working via Playwright mobile viewport testing."
+}

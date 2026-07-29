@@ -34,8 +34,15 @@ export default function LoginScreen() {
     setLoading(true);
     try {
       await signIn(email, password);
+      // Redirect to index which will route based on auth state
+      router.replace('/');
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Login failed');
+      const msg = error.message || 'Login failed';
+      if (Platform.OS === 'web') {
+        window.alert(`Error: ${msg}`);
+      } else {
+        Alert.alert('Error', msg);
+      }
     } finally {
       setLoading(false);
     }
