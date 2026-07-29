@@ -27,7 +27,7 @@ import { theme } from '@/src/theme';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const CARD_WIDTH = SCREEN_WIDTH - 32;
-const CARD_HEIGHT = SCREEN_HEIGHT * 0.72;
+const CARD_HEIGHT = SCREEN_HEIGHT * 0.62;
 const SWIPE_THRESHOLD = 120;
 
 const PLACEHOLDER_IMAGE = 'https://images.unsplash.com/photo-1642290687545-8ab7e6002472?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA3MDR8MHwxfHNlYXJjaHwyfHxwcmVtaXVtJTIwcG9ydHJhaXQlMjBibGFjayUyMGFuZCUyMHdoaXRlfGVufDB8fHx8MTc4NTMyNzI2MXww&ixlib=rb-4.1.0&q=85';
@@ -51,6 +51,7 @@ export default function DiscoverScreen() {
   const [cards, setCards] = useState<Card[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [matchModal, setMatchModal] = useState<MatchModal>({ visible: false, user: null, compatibility: null, matchId: '' });
   const position = useRef(new Animated.ValueXY()).current;
 
@@ -71,12 +72,14 @@ export default function DiscoverScreen() {
 
   const loadCards = async () => {
     setLoading(true);
+    setError(null);
     try {
-      const response = await api.getDiscoveryCards(20);
+      const response = await api.getDiscoveryCards(10);
       setCards(response.cards || []);
       setCurrentIndex(0);
-    } catch (error) {
-      console.error('Load cards error:', error);
+    } catch (err: any) {
+      console.error('Load cards error:', err);
+      setError(err?.message || 'Failed to load profiles');
     } finally {
       setLoading(false);
     }
@@ -162,6 +165,28 @@ export default function DiscoverScreen() {
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={theme.colors.brand} />
           <Text style={styles.loadingText}>Curating profiles for you...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (error) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']} testID="discover-error">
+        <View style={styles.header}>
+          <Text style={styles.brandTitle}>Discover</Text>
+        </View>
+        <View style={styles.emptyState}>
+          <View style={styles.emptyIconWrap}>
+            <Info size={32} color={theme.colors.brand} strokeWidth={1.5} />
+          </View>
+          <Text style={styles.emptyTitle}>Couldn't load profiles</Text>
+          <Text style={styles.emptyText}>
+            Something went wrong. Give it another try.
+          </Text>
+          <TouchableOpacity style={styles.reloadButton} onPress={loadCards} testID="discover-retry">
+            <Text style={styles.reloadButtonText}>Try again</Text>
+          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
@@ -334,7 +359,7 @@ export default function DiscoverScreen() {
       </View>
 
       {/* Action buttons */}
-      <View style={[styles.actions, { paddingBottom: insets.bottom + 90 }]}>
+      <View style={[styles.actions, { paddingBottom: insets.bottom + 100, paddingTop: theme.spacing.lg }]}>
         <TouchableOpacity
           style={[styles.actionButton, styles.passButton]}
           onPress={swipeLeft}

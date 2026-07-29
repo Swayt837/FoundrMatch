@@ -291,10 +291,14 @@ async def get_profile(
 
 @app.get("/api/discovery/cards")
 async def get_discovery_cards(
-    limit: int = 20,
+    limit: int = 10,
     current_user: dict = Depends(get_current_user)
 ):
-    """Get cards for swiping"""
+    """Get cards for swiping - with parallel AI + cache"""
+    import asyncio
+    from database import db as mongo_db
+    
+    compat_cache = mongo_db.compatibility_cache
     user_id = current_user["user_id"]
     
     # Get users already swiped on
@@ -314,23 +318,33 @@ async def get_discovery_cards(
         {"_id": 0, "password_hash": 0, "google_id": 0}
     ).limit(limit).to_list(limit)
     
-    # Calculate compatibility for each candidate
-    cards = []
-    for candidate in candidates:
+    if not candidates:
+        return {"cards": []}
+    
+    # Compute compatibility with parallelism + caching
+    async def compute_or_cache(candidate):
+        pair_key = "-".join(sorted([user_id, candidate["user_id"]]))
+        # Check cache first
+        cached = await compat_cache.find_one({"pair_key": pair_key}, {"_id": 0})
+        if cached and cached.get("compatibility"):
+            return {"user": candidate, "compatibility": cached["compatibility"]}
+        
         try:
-            compatibility = await ai_service.calculate_compatibility(
-                current_user,
-                candidate
+            compatibility = await ai_service.calculate_compatibility(current_user, candidate)
+            # Store in cache
+            await compat_cache.update_one(
+                {"pair_key": pair_key},
+                {"$set": {"pair_key": pair_key, "compatibility": compatibility, "created_at": get_utc_now()}},
+                upsert=True
             )
-            
-            cards.append({
-                "user": candidate,
-                "compatibility": compatibility
-            })
+            return {"user": candidate, "compatibility": compatibility}
         except Exception as e:
-            print(f"Error calculating compatibility: {e}")
-            # Skip this card if compatibility calculation fails
-            continue
+            print(f"Error computing compatibility: {e}")
+            return None
+    
+    # Run all AI calls concurrently
+    results = await asyncio.gather(*[compute_or_cache(c) for c in candidates])
+    cards = [r for r in results if r is not None]
     
     # Sort by compatibility score
     cards.sort(key=lambda x: x["compatibility"]["overall_score"], reverse=True)

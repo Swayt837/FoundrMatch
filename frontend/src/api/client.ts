@@ -99,7 +99,7 @@ class APIClient {
   }
 
   // Discovery
-  async getDiscoveryCards(limit: number = 20) {
+  async getDiscoveryCards(limit: number = 10) {
     return this.request(`/discovery/cards?limit=${limit}`);
   }
 
