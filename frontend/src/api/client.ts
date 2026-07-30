@@ -315,12 +315,25 @@ class APIClient {
   // Discovery / Projects with filters
   async getDiscoveryCardsFiltered(params: {
     limit?: number;
+    /** Stable cursor — the ranking is deterministic, so paging never reshuffles. */
+    offset?: number;
     profession?: string;
     availability?: string;
     city?: string;
     country?: string;
   }) {
     return this.request(`/discovery/cards?${toQueryString(params)}`);
+  }
+
+  // Compatibility
+  /** Full dimension breakdown plus the AI narrative, generated on demand. */
+  async getCompatibility(userId: string) {
+    return this.request(`/compatibility/${userId}`);
+  }
+
+  /** Premium: deep report with founder-risk detection. Throws ApiError 402 if not premium. */
+  async getCompatibilityReport(userId: string) {
+    return this.request(`/compatibility/${userId}/report`);
   }
 
   async getProjectsFiltered(params: {

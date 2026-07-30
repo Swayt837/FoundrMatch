@@ -9,11 +9,11 @@ as an AI verdict — the UI shows that distinction to the user.
 """
 import os
 import json
-from typing import Any, Dict, List, Optional, Type, TypeVar
+from typing import Any, Dict, List, Literal, Optional, Type, TypeVar
 
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, Field, ValidationError
 from emergentintegrations.llm.chat import LlmChat, UserMessage, TextDelta, StreamDone
-from compatibility import extract_json, heuristic_compatibility
+from compatibility import extract_json
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -24,29 +24,49 @@ LLM_MODEL = os.getenv("LLM_MODEL", "claude-sonnet-4-6")
 TModel = TypeVar("TModel", bound=BaseModel)
 
 
+def _report_profile(profile: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    The subset of a profile the report prompt should see.
+
+    Explicit allowlist rather than dumping the whole document: photos are useless
+    to the model and expensive in tokens, and nothing identifying needs to leave
+    the backend for this analysis.
+    """
+    return {
+        field: profile.get(field)
+        for field in (
+            "profession", "skills", "experience", "availability",
+            "objectives", "work_style", "values", "budget", "bio",
+        )
+    }
+
+
 # ===== Schemas the model must conform to =====
 
-class CompatibilityPayload(BaseModel):
-    """The six dimensions Claude is asked to score, plus its explanation."""
-    skills_score: float
-    vision_score: float
-    availability_score: float
-    personality_score: float
-    objectives_score: float
-    work_style_score: float
-    overall_score: float
-    explanation: str
+class ExplanationPayload(BaseModel):
+    """Narrative for an already-computed score."""
+    explanation: str = Field(min_length=1, max_length=2000)
 
-    @field_validator(
-        "skills_score", "vision_score", "availability_score",
-        "personality_score", "objectives_score", "work_style_score",
-        "overall_score",
-        mode="after",
-    )
-    @classmethod
-    def clamp(cls, value: float) -> float:
-        """A model that answers 0-10 or 120 shouldn't corrupt the UI."""
-        return max(0.0, min(100.0, float(value)))
+
+class ReportStrength(BaseModel):
+    title: str
+    detail: str
+
+
+class ReportRisk(BaseModel):
+    title: str
+    severity: Literal["low", "medium", "high"] = "medium"
+    detail: str
+    mitigation: str = ""
+
+
+class DeepReportPayload(BaseModel):
+    """Premium due-diligence read on a pairing."""
+    summary: str
+    strengths: List[ReportStrength] = Field(default_factory=list)
+    risks: List[ReportRisk] = Field(default_factory=list)
+    questions_to_ask: List[str] = Field(default_factory=list)
+    unknowns: List[str] = Field(default_factory=list)
 
 
 class BusinessIdea(BaseModel):
@@ -135,77 +155,118 @@ class AIService:
         print(f"[ai] {session_id} returned unusable JSON after {attempts} attempts: {last_error}")
         return None
 
-    # ===== Compatibility =====
+    # ===== Compatibility narrative =====
 
-    async def calculate_compatibility(
+    async def explain_compatibility(
         self,
-        user1: Dict[str, Any],
-        user2: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        profile1: Dict[str, Any],
+        profile2: Dict[str, Any],
+        scores: Dict[str, Any],
+    ) -> Optional[str]:
         """
-        Score compatibility between two users across six dimensions.
+        Write the "why you two" paragraph for an already-computed score.
 
-        The returned dict carries a `source` field: "ai" when Claude produced the
-        analysis, "heuristic" when it was computed locally from profile overlap.
+        The model no longer decides the number — it explains one. That removes the
+        non-determinism and the score inflation from ranking, and keeps the LLM
+        doing the thing it is actually better at than an algorithm. Returns None if
+        the model is unavailable; callers fall back to the factual summary from
+        `compatibility.summarize`.
         """
-        profile1 = user1.get("profile", {}) or {}
-        profile2 = user2.get("profile", {}) or {}
+        prompt = f"""Two founders have been matched by a scoring engine. Explain the pairing to them.
 
-        prompt = f"""
-You are an expert business matchmaker. Analyze the compatibility between these two entrepreneurs.
-
-Person 1:
+Founder A:
 - Profession: {profile1.get('profession')}
-- Skills: {', '.join(profile1.get('skills', []))}
+- Skills: {', '.join(profile1.get('skills') or []) or 'not specified'}
 - Experience: {profile1.get('experience')}
 - Availability: {profile1.get('availability')}
-- Objectives: {', '.join(profile1.get('objectives', []))}
-- Work Style: {', '.join(profile1.get('work_style', []))}
-- Values: {', '.join(profile1.get('values', []))}
-- Budget: {profile1.get('budget')}
+- Objectives: {', '.join(profile1.get('objectives') or []) or 'not specified'}
+- Work style: {', '.join(profile1.get('work_style') or []) or 'not specified'}
+- Values: {', '.join(profile1.get('values') or []) or 'not specified'}
 
-Person 2:
+Founder B:
 - Profession: {profile2.get('profession')}
-- Skills: {', '.join(profile2.get('skills', []))}
+- Skills: {', '.join(profile2.get('skills') or []) or 'not specified'}
 - Experience: {profile2.get('experience')}
 - Availability: {profile2.get('availability')}
-- Objectives: {', '.join(profile2.get('objectives', []))}
-- Work Style: {', '.join(profile2.get('work_style', []))}
-- Values: {', '.join(profile2.get('values', []))}
-- Budget: {profile2.get('budget')}
+- Objectives: {', '.join(profile2.get('objectives') or []) or 'not specified'}
+- Work style: {', '.join(profile2.get('work_style') or []) or 'not specified'}
+- Values: {', '.join(profile2.get('values') or []) or 'not specified'}
 
-Provide a compatibility analysis with scores (0-100) for:
-1. Skills Compatibility (complementary skills are better than identical ones)
-2. Vision Alignment (similar long-term intent and values)
-3. Availability Match
-4. Personality/Work Style Compatibility
-5. Objectives Alignment
-6. Work Style Match
+Computed scores (0-100), which you must treat as given:
+- Complementary skills: {scores.get('skills_score')}
+- Shared objectives: {scores.get('objectives_score')}
+- Vision & values: {scores.get('vision_score')}
+- Availability: {scores.get('availability_score')}
+- Work style: {scores.get('work_style_score')}
+- Working chemistry: {scores.get('personality_score')}
+- Overall: {scores.get('overall_score')}
 
-Return ONLY a JSON object with this exact structure (no markdown, no extra text):
-{{
-  "skills_score": <number>,
-  "vision_score": <number>,
-  "availability_score": <number>,
-  "personality_score": <number>,
-  "objectives_score": <number>,
-  "work_style_score": <number>,
-  "overall_score": <number>,
-  "explanation": "<2-3 sentence explanation of why they're compatible>"
-}}
-"""
+Write 2-3 sentences addressed to Founder A about Founder B. Ground every claim in the
+data above. Name the strongest dimension and, if any score is below 50, name that
+tension honestly rather than glossing over it. Do not invent facts, do not restate
+the numbers, and do not use bullet points.
+
+Return ONLY a JSON object: {{"explanation": "<your 2-3 sentences>"}}"""
 
         result = await self._ask_json(
-            session_id="compatibility-analysis",
-            system_message="You are a business matchmaking expert. Always respond with valid JSON only.",
+            session_id="compatibility-explanation",
+            system_message=(
+                "You are a business matchmaking expert. You explain scores you are given; "
+                "you never re-score. Always respond with valid JSON only."
+            ),
             prompt=prompt,
-            schema=CompatibilityPayload,
+            schema=ExplanationPayload,
         )
 
-        if result is not None:
-            return {**result.model_dump(), "source": "ai"}
+        return result.explanation if result else None
 
-        return heuristic_compatibility(profile1, profile2)
+    async def deep_compatibility_report(
+        self,
+        profile1: Dict[str, Any],
+        profile2: Dict[str, Any],
+        scores: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Premium: full breakdown with founder-risk detection.
+
+        This is the "Deep AI compatibility report" the paywall advertises. Unlike the
+        feed explanation it is expensive and slow by design — one call per request,
+        premium only, cached by pair.
+        """
+        prompt = f"""Two founders are considering building a company together. Produce a candid
+due-diligence read on the pairing for Founder A.
+
+Founder A: {json.dumps(_report_profile(profile1), ensure_ascii=False)}
+Founder B: {json.dumps(_report_profile(profile2), ensure_ascii=False)}
+
+Computed compatibility scores (0-100), treat as given: {json.dumps(scores, ensure_ascii=False)}
+
+Be useful rather than encouraging. Founders lose years to partnerships that looked good
+on paper, so name the real risks — misaligned commitment, duplicated skills with a gap
+nobody covers, incompatible funding philosophy, seniority imbalance, unclear division of
+ownership. Ground every point in the data; if something cannot be assessed from these
+profiles, say so instead of speculating.
+
+Return ONLY a JSON object with this structure:
+{{
+  "summary": "<2-3 sentence overall read>",
+  "strengths": [{{"title": "<short>", "detail": "<1-2 sentences>"}}],
+  "risks": [{{"title": "<short>", "severity": "low|medium|high", "detail": "<1-2 sentences>", "mitigation": "<one concrete step>"}}],
+  "questions_to_ask": ["<question A should ask B before committing>"],
+  "unknowns": ["<what these profiles do not tell you>"]
+}}"""
+
+        result = await self._ask_json(
+            session_id="compatibility-report",
+            system_message=(
+                "You are a diligence analyst for founder partnerships. You are candid about "
+                "risk and never inflate a match. Always respond with valid JSON only."
+            ),
+            prompt=prompt,
+            schema=DeepReportPayload,
+        )
+
+        return result.model_dump() if result else None
 
     # ===== Business ideas =====
 

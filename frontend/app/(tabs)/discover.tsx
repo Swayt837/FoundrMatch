@@ -378,15 +378,14 @@ export default function DiscoverScreen() {
             style={styles.gradient}
           />
 
-          {/* Compatibility badge - top. "est." marks a locally computed score,
-              so an AI outage never masquerades as a real AI verdict. */}
+          {/* Compatibility badge - top. The score is computed deterministically by
+              the backend engine, so it's authoritative — no hedging label. */}
           <View style={styles.compatBadge}>
             <BlurView intensity={40} tint="dark" style={styles.compatBadgeBlur}>
               <View style={styles.compatBadgeInner}>
                 <Zap size={12} color={theme.colors.brand} strokeWidth={2} fill={theme.colors.brand} />
                 <Text style={styles.compatBadgeText}>
                   {Math.round(compatibility.overall_score)}% match
-                  {compatibility.source && compatibility.source !== 'ai' ? ' (est.)' : ''}
                 </Text>
               </View>
             </BlurView>

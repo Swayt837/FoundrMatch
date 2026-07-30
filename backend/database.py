@@ -4,7 +4,7 @@ Database connection and utilities
 import os
 from motor.motor_asyncio import AsyncIOMotorClient
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any
+from typing import Dict, Any
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -112,6 +112,62 @@ async def run_migrations():
     )
     if result.modified_count:
         print(f"✅ Migration: initialised premium=false on {result.modified_count} user(s)")
+
+    # Scores from the old LLM scorer sat in the 85-98 band; the current engine
+    # spans 0-100. Leaving both in the database would rank inflated legacy scores
+    # above correctly-scored recent matches in the same list.
+    rescored = await rescore_matches(
+        {"compatibility_score.source": {"$ne": "algorithmic"}}
+    )
+    if rescored:
+        print(f"✅ Migration: rescored {rescored} match(es) with the current engine")
+
+
+async def rescore_matches(query: Dict[str, Any]) -> int:
+    """
+    Recompute `compatibility_score` for every match matching `query`.
+
+    Scoring is local and free, so this is cheap to run whenever the inputs change —
+    at startup for legacy records, and after a profile edit. Returns how many
+    matches were updated.
+    """
+    from compatibility import score_compatibility
+
+    matches = await matches_collection.find(
+        query, {"_id": 0, "match_id": 1, "user1_id": 1, "user2_id": 1}
+    ).to_list(None)
+
+    if not matches:
+        return 0
+
+    # One read per participant profile, rather than two reads per match.
+    user_ids = {uid for m in matches for uid in (m["user1_id"], m["user2_id"])}
+    users = await users_collection.find(
+        {"user_id": {"$in": list(user_ids)}}, {"_id": 0, "user_id": 1, "profile": 1}
+    ).to_list(None)
+    profiles = {u["user_id"]: (u.get("profile") or {}) for u in users}
+
+    rescored = 0
+    for match in matches:
+        profile1 = profiles.get(match["user1_id"])
+        profile2 = profiles.get(match["user2_id"])
+        if profile1 is None or profile2 is None:
+            continue  # a participant was deleted; leave the record alone
+
+        await matches_collection.update_one(
+            {"match_id": match["match_id"]},
+            {"$set": {"compatibility_score": score_compatibility(profile1, profile2)}},
+        )
+        rescored += 1
+
+    return rescored
+
+
+async def rescore_matches_for(user_id: str) -> int:
+    """Rescore every match this user is part of — call after their profile changes."""
+    return await rescore_matches(
+        {"$or": [{"user1_id": user_id}, {"user2_id": user_id}]}
+    )
 
 
 async def generate_user_id() -> str:

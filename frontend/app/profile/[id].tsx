@@ -35,7 +35,8 @@ import {
   Languages as LanguagesIcon,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
-import { api } from '@/src/api/client';
+import { api, ApiError } from '@/src/api/client';
+import { useAuth } from '@/src/contexts/AuthContext';
 import { theme } from '@/src/theme';
 
 const PLACEHOLDER =
@@ -47,13 +48,28 @@ export default function ProfileDetailScreen() {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
 
+  const { user: me } = useAuth();
+
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activePhoto, setActivePhoto] = useState(0);
 
+  // Compatibility loads separately: the profile should render immediately, while
+  // the AI narrative behind the score takes a moment.
+  const [compat, setCompat] = useState<any>(null);
+  const [compatLoading, setCompatLoading] = useState(false);
+
+  const [report, setReport] = useState<any>(null);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
+
   useEffect(() => {
-    if (id) load();
+    if (id) {
+      load();
+      loadCompatibility();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   const load = async () => {
@@ -72,6 +88,36 @@ export default function ProfileDetailScreen() {
       setError(err?.detail || err?.message || 'Failed to load profile');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadCompatibility = async () => {
+    setCompatLoading(true);
+    try {
+      setCompat(await api.getCompatibility(id as string));
+    } catch {
+      // Non-blocking: the profile is still worth showing without the breakdown.
+      setCompat(null);
+    } finally {
+      setCompatLoading(false);
+    }
+  };
+
+  const loadReport = async () => {
+    if (reportLoading) return;
+    setReportLoading(true);
+    setReportError(null);
+    try {
+      const data = await api.getCompatibilityReport(id as string);
+      setReport(data.report);
+    } catch (e: any) {
+      if (e instanceof ApiError && e.isPaymentRequired) {
+        router.push('/premium');
+        return;
+      }
+      setReportError(e?.detail || e?.message || 'Could not generate the report');
+    } finally {
+      setReportLoading(false);
     }
   };
 
@@ -256,6 +302,112 @@ export default function ProfileDetailScreen() {
 
         {/* Body */}
         <View style={styles.body}>
+          {/* Compatibility — score computed by the backend engine, narrative by AI */}
+          {compat?.compatibility && (
+            <Section
+              title="Compatibility"
+              icon={<Zap size={14} color={theme.colors.brand} strokeWidth={2} />}
+            >
+              <View style={styles.compatHeader}>
+                <Text style={styles.compatScore}>
+                  {Math.round(compat.compatibility.overall_score)}
+                  <Text style={styles.compatScoreUnit}>%</Text>
+                </Text>
+                <Text style={styles.compatCaption}>
+                  weighted across {compat.breakdown?.length ?? 6} dimensions
+                </Text>
+              </View>
+
+              {compat.breakdown?.map((item: any) => (
+                <View key={item.key} style={styles.dimensionRow}>
+                  <View style={styles.dimensionLabelRow}>
+                    <Text style={styles.dimensionLabel}>{item.label}</Text>
+                    <Text style={styles.dimensionValue}>{Math.round(item.score)}</Text>
+                  </View>
+                  <View style={styles.dimensionTrack}>
+                    <View
+                      style={[
+                        styles.dimensionFill,
+                        { width: `${Math.max(2, Math.min(100, item.score))}%` },
+                        item.score < 50 && styles.dimensionFillWeak,
+                      ]}
+                    />
+                  </View>
+                </View>
+              ))}
+
+              <Text style={styles.compatNarrative}>{compat.compatibility.explanation}</Text>
+
+              {/* Premium: deep report with risk detection */}
+              {report ? (
+                <View style={styles.reportBlock} testID="compat-report">
+                  <Text style={styles.reportSummary}>{report.summary}</Text>
+
+                  {report.risks?.length > 0 && (
+                    <>
+                      <Text style={styles.reportHeading}>Risks</Text>
+                      {report.risks.map((risk: any, i: number) => (
+                        <View key={i} style={styles.riskRow}>
+                          <View
+                            style={[
+                              styles.severityDot,
+                              risk.severity === 'high' && styles.severityHigh,
+                              risk.severity === 'low' && styles.severityLow,
+                            ]}
+                          />
+                          <View style={styles.flexOne}>
+                            <Text style={styles.riskTitle}>{risk.title}</Text>
+                            <Text style={styles.riskDetail}>{risk.detail}</Text>
+                            {risk.mitigation ? (
+                              <Text style={styles.riskMitigation}>→ {risk.mitigation}</Text>
+                            ) : null}
+                          </View>
+                        </View>
+                      ))}
+                    </>
+                  )}
+
+                  {report.questions_to_ask?.length > 0 && (
+                    <>
+                      <Text style={styles.reportHeading}>Ask before committing</Text>
+                      {report.questions_to_ask.map((question: string, i: number) => (
+                        <Text key={i} style={styles.reportBullet}>• {question}</Text>
+                      ))}
+                    </>
+                  )}
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={styles.reportCta}
+                  onPress={loadReport}
+                  disabled={reportLoading}
+                  activeOpacity={0.85}
+                  testID="compat-report-cta"
+                >
+                  {reportLoading ? (
+                    <ActivityIndicator size="small" color={theme.colors.brand} />
+                  ) : (
+                    <>
+                      <Sparkles size={13} color={theme.colors.brand} strokeWidth={2} />
+                      <Text style={styles.reportCtaText}>
+                        {me?.premium ? 'Generate deep report' : 'Deep report — Premium'}
+                      </Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              )}
+
+              {reportError && <Text style={styles.reportError}>{reportError}</Text>}
+            </Section>
+          )}
+
+          {compatLoading && !compat && (
+            <View style={styles.compatLoading}>
+              <ActivityIndicator size="small" color={theme.colors.brand} />
+              <Text style={styles.compatLoadingText}>Analysing compatibility…</Text>
+            </View>
+          )}
+
           {/* Bio */}
           {profile.bio ? (
             <Section title="About" icon={<Sparkles size={14} color={theme.colors.brand} strokeWidth={2} />}>
@@ -497,6 +649,94 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: theme.colors.brandOn,
     letterSpacing: 0.5,
+  },
+  flexOne: { flex: 1 },
+  compatHeader: { flexDirection: 'row', alignItems: 'baseline', gap: theme.spacing.sm },
+  compatScore: { ...theme.typography.displayLarge, color: theme.colors.brand },
+  compatScoreUnit: { ...theme.typography.title2, color: theme.colors.brand },
+  compatCaption: { ...theme.typography.caption, color: theme.colors.textSecondary, flex: 1 },
+  dimensionRow: { marginTop: theme.spacing.md },
+  dimensionLabelRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  dimensionLabel: { ...theme.typography.footnote, color: theme.colors.textTertiary },
+  dimensionValue: { ...theme.typography.footnote, color: theme.colors.text, fontWeight: '600' },
+  dimensionTrack: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: theme.colors.surfaceTertiary,
+    overflow: 'hidden',
+  },
+  dimensionFill: { height: '100%', borderRadius: 3, backgroundColor: theme.colors.brand },
+  // A dimension below 50 is a real tension — show it, don't dress it up as gold.
+  dimensionFillWeak: { backgroundColor: theme.colors.errorOn },
+  compatNarrative: {
+    ...theme.typography.body,
+    color: theme.colors.textTertiary,
+    lineHeight: 24,
+    marginTop: theme.spacing.lg,
+  },
+  compatLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.sm,
+    paddingVertical: theme.spacing.lg,
+  },
+  compatLoadingText: { ...theme.typography.footnote, color: theme.colors.textSecondary },
+  reportCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: theme.spacing.lg,
+    paddingVertical: 12,
+    borderRadius: theme.radius.pill,
+    backgroundColor: theme.colors.brandTertiary,
+    borderWidth: 1,
+    borderColor: 'rgba(212,175,55,0.3)',
+  },
+  reportCtaText: { ...theme.typography.subhead, color: theme.colors.brand, fontWeight: '500' },
+  reportBlock: { marginTop: theme.spacing.lg, gap: theme.spacing.sm },
+  reportSummary: { ...theme.typography.body, color: theme.colors.text, lineHeight: 24 },
+  reportHeading: {
+    ...theme.typography.micro,
+    color: theme.colors.textSecondary,
+    marginTop: theme.spacing.md,
+  },
+  riskRow: { flexDirection: 'row', gap: theme.spacing.sm, alignItems: 'flex-start' },
+  severityDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginTop: 6,
+    backgroundColor: theme.colors.warningOn,
+  },
+  severityHigh: { backgroundColor: theme.colors.errorOn },
+  severityLow: { backgroundColor: theme.colors.successOn },
+  riskTitle: { ...theme.typography.callout, color: theme.colors.text, fontWeight: '500' },
+  riskDetail: {
+    ...theme.typography.footnote,
+    color: theme.colors.textTertiary,
+    lineHeight: 19,
+    marginTop: 2,
+  },
+  riskMitigation: {
+    ...theme.typography.footnote,
+    color: theme.colors.brand,
+    marginTop: 4,
+  },
+  reportBullet: {
+    ...theme.typography.footnote,
+    color: theme.colors.textTertiary,
+    lineHeight: 20,
+  },
+  reportError: {
+    ...theme.typography.footnote,
+    color: theme.colors.errorOn,
+    marginTop: theme.spacing.sm,
   },
   reportRow: {
     flexDirection: 'row',

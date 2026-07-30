@@ -1,25 +1,30 @@
 """
-Compatibility scoring logic, with no external dependencies.
+Compatibility scoring — deterministic, dependency-free, and the primary engine.
 
-Kept separate from `ai_service` so the deterministic parts — JSON extraction and
-the heuristic fallback — can be imported and tested without the LLM SDK, a
-database or a network connection.
+This used to be a fallback behind an LLM call that scored every pair. That design
+had three problems the model could not fix: asking Claude to rate compatibility
+returns 85-98% for almost any pair (a ranking signal that is always high ranks
+nothing), the same pair scored differently on each call, and the overall score was
+whatever the model said rather than a function of the six dimensions.
+
+So the number is computed here and the LLM writes *about* it — see
+`ai_service.explain_compatibility`. Properties this buys:
+
+- **Deterministic** — same pair, same score, cacheable forever.
+- **Spread** — each dimension is defined over the full 0-100 range, so the weighted
+  overall uses it too. A mediocre pair genuinely scores low.
+- **Tunable** — `DIMENSION_WEIGHTS` can be fitted against real swipe/match/message
+  outcomes, which is impossible when the model is the judge.
+- **Free and instant** — thousands of candidates can be ranked per request.
 """
 import json
 import re
-from typing import Any, Dict
+from typing import Any, Dict, List, Set
 
-# Rough weekly-hours equivalent, used to compare availability commitments.
-AVAILABILITY_HOURS = {
-    "full_time": 40,
-    "immediate": 40,
-    "20h_week": 20,
-    "10h_week": 10,
-    "evenings": 12,
-    "weekends": 12,
-}
+from skills_taxonomy import concepts_for, domains_for, normalize
 
-# How much each dimension contributes to the overall score.
+# How much each dimension contributes. Every dimension is scored 0-100, so these
+# weights must sum to 1.0 for the overall score to span 0-100.
 DIMENSION_WEIGHTS = {
     "skills_score": 0.30,
     "objectives_score": 0.20,
@@ -29,15 +34,47 @@ DIMENSION_WEIGHTS = {
     "personality_score": 0.10,
 }
 
+# Weekly hours each availability option implies, for comparing commitment.
+AVAILABILITY_HOURS = {
+    "full_time": 40,
+    "immediate": 40,
+    "20h_week": 20,
+    "10h_week": 10,
+    "evenings": 12,
+    "weekends": 12,
+}
+
+# Seniority ladder. Founders at a similar level tend to work together as peers;
+# a large gap predicts friction over decision-making.
+EXPERIENCE_RANK = {
+    "beginner": 1,
+    "junior": 2,
+    "confirmed": 3,
+    "senior": 4,
+    "sold_company": 5,
+    "raised_funds": 5,
+    "multiple_startups": 6,
+}
+
+# Used when one side has no data: neither aligned nor opposed.
+NEUTRAL = 0.5
+
+# Complementary *domains* matter more for cofounders than complementary
+# individual skills — a developer and a designer is the shape we're looking for.
+_DOMAIN_WEIGHT = 0.6
+_CONCEPT_WEIGHT = 0.4
+
 _FENCE_RE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.IGNORECASE)
 
+
+# ===== JSON extraction (used by ai_service for LLM responses) =====
 
 def extract_json(text: str) -> Any:
     """
     Pull a JSON value out of a model response.
 
     Handles bare JSON, fenced blocks, and prose wrapped around the payload. The
-    previous implementation sliced off the first and last line, which silently
+    original implementation sliced off the first and last line, which silently
     corrupted any response whose fence was missing or unbalanced.
     """
     cleaned = _FENCE_RE.sub("", (text or "").strip())
@@ -46,7 +83,6 @@ def extract_json(text: str) -> Any:
     except json.JSONDecodeError:
         pass
 
-    # Fall back to the outermost object/array in the response.
     for opener, closer in (("{", "}"), ("[", "]")):
         start = cleaned.find(opener)
         end = cleaned.rfind(closer)
@@ -59,93 +95,228 @@ def extract_json(text: str) -> Any:
     raise ValueError("No JSON object found in model response")
 
 
-def _normalized(values: Any) -> set:
-    """Lower-case, trimmed set of tag-like values; empty for anything missing."""
+# ===== Set similarity =====
+
+def _normalized_set(values: Any) -> Set[str]:
+    """Lower-cased, trimmed set of tag-like values."""
     if not values:
         return set()
-    return {str(v).strip().lower() for v in values if str(v).strip()}
+    return {normalize(str(v)) for v in values if normalize(str(v))}
 
 
-def _overlap_ratio(a: set, b: set) -> float:
-    """Jaccard similarity; 0.0 when either side is empty (unknown, not opposed)."""
+def _similarity(a: Set[str], b: Set[str]) -> float:
+    """
+    Jaccard similarity in 0..1, NEUTRAL when either side is empty.
+
+    Empty means "unknown", not "opposed" — scoring it 0 would punish incomplete
+    profiles as though they were incompatible.
+    """
     if not a or not b:
-        return 0.0
+        return NEUTRAL
     return len(a & b) / len(a | b)
 
 
-def heuristic_compatibility(
+def _complementarity(a: Set[str], b: Set[str]) -> float:
+    """How *different* two sets are, in 0..1. NEUTRAL when either is empty."""
+    if not a or not b:
+        return NEUTRAL
+    return 1 - (len(a & b) / len(a | b))
+
+
+# ===== Per-dimension scores, each 0-100 =====
+
+def _skills_score(profile1: Dict[str, Any], profile2: Dict[str, Any]) -> float:
+    """
+    Complementarity of what the two founders can build.
+
+    Measured at two levels: different *domains* (frontend vs sales) is the strong
+    signal, non-overlapping *concepts* within a domain is the weaker one. Both are
+    resolved through the taxonomy, so "React" and "Frontend" are recognised as the
+    same ground rather than two unrelated skills.
+    """
+    domains1 = domains_for(profile1.get("skills"), profile1.get("profession") or "")
+    domains2 = domains_for(profile2.get("skills"), profile2.get("profession") or "")
+    concepts1 = concepts_for(profile1.get("skills"))
+    concepts2 = concepts_for(profile2.get("skills"))
+
+    domain_part = _complementarity(domains1, domains2)
+    concept_part = _complementarity(concepts1, concepts2)
+
+    return 100 * (_DOMAIN_WEIGHT * domain_part + _CONCEPT_WEIGHT * concept_part)
+
+
+def _objectives_score(profile1: Dict[str, Any], profile2: Dict[str, Any]) -> float:
+    """Alignment on what they want to build."""
+    return 100 * _similarity(
+        _normalized_set(profile1.get("objectives")),
+        _normalized_set(profile2.get("objectives")),
+    )
+
+
+def _vision_score(profile1: Dict[str, Any], profile2: Dict[str, Any]) -> float:
+    """
+    Alignment on how they want to build it.
+
+    Values carry more weight than objectives here: two founders can agree on
+    building a SaaS and still split over bootstrap-versus-raise.
+    """
+    values = _similarity(
+        _normalized_set(profile1.get("values")),
+        _normalized_set(profile2.get("values")),
+    )
+    objectives = _similarity(
+        _normalized_set(profile1.get("objectives")),
+        _normalized_set(profile2.get("objectives")),
+    )
+    return 100 * (0.65 * values + 0.35 * objectives)
+
+
+def _availability_score(profile1: Dict[str, Any], profile2: Dict[str, Any]) -> float:
+    """
+    Closeness of weekly commitment.
+
+    A full-time founder paired with a weekends-only one is the classic failure
+    mode, so the gap is penalised on committed hours rather than on label equality.
+    """
+    hours1 = AVAILABILITY_HOURS.get(normalize(str(profile1.get("availability") or "")).replace(" ", "_"))
+    hours2 = AVAILABILITY_HOURS.get(normalize(str(profile2.get("availability") or "")).replace(" ", "_"))
+
+    if not hours1 or not hours2:
+        return 100 * NEUTRAL
+
+    gap = abs(hours1 - hours2)
+    return 100 * max(0.0, 1 - gap / 40)
+
+
+def _work_style_score(profile1: Dict[str, Any], profile2: Dict[str, Any]) -> float:
+    """Shared working habits — remote vs in-person, fast vs methodical."""
+    return 100 * _similarity(
+        _normalized_set(profile1.get("work_style")),
+        _normalized_set(profile2.get("work_style")),
+    )
+
+
+def _personality_score(profile1: Dict[str, Any], profile2: Dict[str, Any]) -> float:
+    """
+    Proxy for how well they will get on day to day.
+
+    The `personality` profile field has never been collected, so this is derived
+    from seniority proximity (peers argue better than a senior/junior pair) and
+    shared working habits. Once the personality assessment ships, that data
+    replaces the seniority half.
+    """
+    rank1 = EXPERIENCE_RANK.get(normalize(str(profile1.get("experience") or "")).replace(" ", "_"))
+    rank2 = EXPERIENCE_RANK.get(normalize(str(profile2.get("experience") or "")).replace(" ", "_"))
+
+    if rank1 and rank2:
+        max_gap = max(EXPERIENCE_RANK.values()) - min(EXPERIENCE_RANK.values())
+        seniority = 1 - abs(rank1 - rank2) / max_gap
+    else:
+        seniority = NEUTRAL
+
+    habits = _similarity(
+        _normalized_set(profile1.get("work_style")),
+        _normalized_set(profile2.get("work_style")),
+    )
+
+    return 100 * (0.5 * seniority + 0.5 * habits)
+
+
+_SCORERS = {
+    "skills_score": _skills_score,
+    "objectives_score": _objectives_score,
+    "vision_score": _vision_score,
+    "availability_score": _availability_score,
+    "work_style_score": _work_style_score,
+    "personality_score": _personality_score,
+}
+
+
+# ===== Public API =====
+
+def score_compatibility(
     profile1: Dict[str, Any],
     profile2: Dict[str, Any],
 ) -> Dict[str, Any]:
     """
-    Score two profiles without the LLM.
+    Score two profiles across six dimensions plus a weighted overall.
 
-    Same six dimensions as the AI path so the UI renders identically, but derived
-    from profile overlap: complementary skills and professions score high, shared
-    objectives and values score high, and availability is compared on committed
-    hours. Tagged `source="heuristic"` so the client can label it honestly instead
-    of presenting a fallback as a real AI verdict.
+    Every value is 0-100 and the function is symmetric, deterministic and free.
+    `explanation` is a factual summary; the narrative version is generated on
+    demand by `ai_service.explain_compatibility`.
     """
-    skills1, skills2 = _normalized(profile1.get("skills")), _normalized(profile2.get("skills"))
-    objectives1, objectives2 = _normalized(profile1.get("objectives")), _normalized(profile2.get("objectives"))
-    values1, values2 = _normalized(profile1.get("values")), _normalized(profile2.get("values"))
-    style1, style2 = _normalized(profile1.get("work_style")), _normalized(profile2.get("work_style"))
-
-    # Skills: complementarity wins. Different professions plus little skill
-    # overlap is the ideal cofounder pairing.
-    skills_overlap = _overlap_ratio(skills1, skills2)
-    different_profession = bool(
-        profile1.get("profession")
-        and profile2.get("profession")
-        and profile1.get("profession") != profile2.get("profession")
-    )
-    skills_score = (55 if different_profession else 35) + 45 * (1 - skills_overlap)
-
-    # Objectives and values: alignment wins.
-    objectives_score = 45 + 55 * _overlap_ratio(objectives1, objectives2)
-    vision_score = 45 + 55 * (
-        (_overlap_ratio(values1, values2) + _overlap_ratio(objectives1, objectives2)) / 2
-    )
-
-    # Availability: compare committed hours.
-    hours1 = AVAILABILITY_HOURS.get(str(profile1.get("availability") or "").lower())
-    hours2 = AVAILABILITY_HOURS.get(str(profile2.get("availability") or "").lower())
-    if hours1 and hours2:
-        availability_score = 100 - min(60, abs(hours1 - hours2) * 2)
-    else:
-        availability_score = 60.0
-
-    # Work style and personality: shared habits reduce friction.
-    style_overlap = _overlap_ratio(style1, style2)
-    work_style_score = 50 + 50 * style_overlap
-    personality_score = 55 + 45 * style_overlap
-
-    scores = {
-        "skills_score": round(min(100.0, skills_score), 1),
-        "vision_score": round(min(100.0, vision_score), 1),
-        "availability_score": round(min(100.0, float(availability_score)), 1),
-        "personality_score": round(min(100.0, personality_score), 1),
-        "objectives_score": round(min(100.0, objectives_score), 1),
-        "work_style_score": round(min(100.0, work_style_score), 1),
-    }
-
-    overall = sum(scores[dimension] * weight for dimension, weight in DIMENSION_WEIGHTS.items())
-
-    shared = sorted(objectives1 & objectives2)
-    if shared:
-        explanation = (
-            f"Estimated from profile data: complementary skill sets and shared interest in "
-            f"{', '.join(shared[:3])}. Detailed AI analysis is temporarily unavailable."
-        )
-    else:
-        explanation = (
-            "Estimated from profile data: skills, availability and working habits look "
-            "workable together. Detailed AI analysis is temporarily unavailable."
-        )
+    scores = {name: round(scorer(profile1, profile2), 1) for name, scorer in _SCORERS.items()}
+    overall = sum(scores[name] * weight for name, weight in DIMENSION_WEIGHTS.items())
 
     return {
         **scores,
         "overall_score": round(overall, 1),
-        "explanation": explanation,
-        "source": "heuristic",
+        "explanation": summarize(profile1, profile2, scores),
+        "source": "algorithmic",
     }
+
+
+def summarize(
+    profile1: Dict[str, Any],
+    profile2: Dict[str, Any],
+    scores: Dict[str, float],
+) -> str:
+    """
+    One-line factual summary of why the score landed where it did.
+
+    Deliberately plain — it states what the data says. The persuasive version is
+    the LLM's job.
+    """
+    parts: List[str] = []
+
+    domains1 = domains_for(profile1.get("skills"), profile1.get("profession") or "")
+    domains2 = domains_for(profile2.get("skills"), profile2.get("profession") or "")
+    distinct = sorted((domains1 | domains2) - (domains1 & domains2))
+    if distinct and scores["skills_score"] >= 60:
+        parts.append(f"complementary strengths across {', '.join(distinct[:3])}")
+    elif domains1 & domains2:
+        parts.append(f"overlapping focus on {', '.join(sorted(domains1 & domains2)[:2])}")
+
+    shared_objectives = _normalized_set(profile1.get("objectives")) & _normalized_set(profile2.get("objectives"))
+    if shared_objectives:
+        parts.append(f"both aiming at {', '.join(sorted(shared_objectives)[:3])}")
+
+    if scores["availability_score"] >= 90:
+        parts.append("matching availability")
+    elif scores["availability_score"] <= 40:
+        parts.append("a notable gap in weekly availability")
+
+    if not parts:
+        return "Not enough profile data yet to say much — completing both profiles will sharpen this."
+
+    return f"Based on profile data: {'; '.join(parts)}."
+
+
+def dimension_breakdown(scores: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Scores as an ordered, labelled list for the UI, strongest first.
+
+    Keeps the display order and weights in one place instead of hardcoding them in
+    the client.
+    """
+    labels = {
+        "skills_score": "Complementary skills",
+        "objectives_score": "Shared objectives",
+        "vision_score": "Vision & values",
+        "availability_score": "Availability",
+        "work_style_score": "Work style",
+        "personality_score": "Working chemistry",
+    }
+    return sorted(
+        (
+            {
+                "key": key,
+                "label": labels[key],
+                "score": scores.get(key, 0),
+                "weight": weight,
+            }
+            for key, weight in DIMENSION_WEIGHTS.items()
+        ),
+        key=lambda d: d["score"],
+        reverse=True,
+    )

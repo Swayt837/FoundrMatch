@@ -50,13 +50,13 @@ jobs:
       # requirements.txt pins a privately hosted litellm wheel and the
       # emergentintegrations SDK, which CI cannot fetch. The unit suites are
       # written to need none of that, so only their dependencies are installed
-      # here. The API-level suites in this folder target a deployed backend and
-      # are excluded.
+      # here.
       - name: Install test dependencies
-        run: pip install pytest pytest-asyncio pydantic fastapi motor python-dotenv
+        run: pip install pytest pytest-asyncio pydantic email-validator fastapi motor python-dotenv
 
+      # The whole directory: tests/conftest.py skips the suites that need a
+      # deployed backend (they run only when EXPO_PUBLIC_BACKEND_URL is set), so
+      # new unit suites are picked up automatically instead of needing to be
+      # listed here.
       - name: Unit tests
-        run: >-
-          pytest tests/test_serializers.py tests/test_compatibility.py
-          tests/test_gamification.py tests/test_rate_limit.py
-          -o addopts='' -q
+        run: pytest tests -o addopts='' -q

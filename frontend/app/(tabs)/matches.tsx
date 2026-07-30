@@ -106,8 +106,6 @@ export default function MatchesScreen() {
     const compat = item.compatibility;
     const compatScore = Math.round(compat?.overall_score || 0);
     const unread = item.unread_count || 0;
-    // A heuristic score is an estimate, not an AI verdict — label it as such.
-    const isEstimate = compat?.source && compat.source !== 'ai';
 
     return (
       <View style={styles.rowContainer}>
@@ -141,9 +139,9 @@ export default function MatchesScreen() {
                   <Text style={styles.premiumPillText}>PRO</Text>
                 </View>
               )}
-              <View style={[styles.compatBadge, isEstimate && styles.compatBadgeEstimate]}>
+              <View style={styles.compatBadge}>
                 <Zap size={10} color={theme.colors.brand} strokeWidth={2} fill={theme.colors.brand} />
-                <Text style={styles.compatText}>{compatScore}%{isEstimate ? ' est.' : ''}</Text>
+                <Text style={styles.compatText}>{compatScore}%</Text>
               </View>
             </View>
             <Text style={styles.rowMeta} numberOfLines={1}>
@@ -365,9 +363,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: theme.colors.brandOn,
     letterSpacing: 0.4,
-  },
-  compatBadgeEstimate: {
-    opacity: 0.7,
   },
   rowExplainUnread: {
     color: theme.colors.text,
