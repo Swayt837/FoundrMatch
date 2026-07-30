@@ -13,7 +13,7 @@ import {
   Filter, X, Check, MapPin, Users,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
-import { api } from '@/src/api/client';
+import { useProjects } from '@/src/api/queries';
 import { theme } from '@/src/theme';
 
 const PROFESSIONS = [
@@ -41,9 +41,6 @@ const EMPTY_FILTERS: Filters = {};
 export default function ProjectsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const [projects, setProjects] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
 
@@ -53,30 +50,23 @@ export default function ProjectsScreen() {
     ).length;
   }, [filters]);
 
+  // Each filter combination is its own cache entry, so going back to a previous
+  // filter set is instant and changing filters keeps the old list on screen
+  // (`placeholderData` in the hook) instead of flashing a spinner.
+  const { data, isPending, isRefetching, refetch } = useProjects({
+    status: 'open',
+    limit: 20,
+    ...filters,
+  });
+
+  const projects: any[] = data?.projects ?? [];
+
+  // A project posted or applied to from a detail screen should show up on return.
   useFocusEffect(
     useCallback(() => {
-      loadProjects(filters);
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [filters])
+      refetch();
+    }, [refetch])
   );
-
-  const loadProjects = async (f: Filters) => {
-    setLoading(true);
-    try {
-      const response = await api.getProjectsFiltered({ status: 'open', limit: 20, ...f });
-      setProjects(response.projects || []);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await loadProjects(filters);
-    setRefreshing(false);
-  };
 
   const haptic = () => {
     if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -155,7 +145,7 @@ export default function ProjectsScreen() {
         </View>
       )}
 
-      {loading && !refreshing ? (
+      {isPending ? (
         <View style={styles.centered}>
           <ActivityIndicator color={theme.colors.brand} />
         </View>
@@ -163,7 +153,7 @@ export default function ProjectsScreen() {
         <ScrollView
           contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 100 }]}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.brand} />
+            <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={theme.colors.brand} />
           }
           showsVerticalScrollIndicator={false}
         >

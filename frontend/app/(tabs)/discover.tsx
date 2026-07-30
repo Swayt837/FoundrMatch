@@ -1,7 +1,7 @@
 /**
  * Discover Screen - Cinematic swipe experience
  */
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -24,6 +24,7 @@ import { X, Heart, Zap, MapPin, Briefcase, Clock, Sparkles, Info, SlidersHorizon
 import * as Haptics from 'expo-haptics';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { api, ApiError } from '@/src/api/client';
+import { useDiscoveryCards } from '@/src/api/queries';
 import { theme } from '@/src/theme';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = { width: 390, height: 844 };
@@ -73,10 +74,7 @@ export default function DiscoverScreen() {
   const { width: winWidth, height: winHeight } = useWindowDimensions();
   const CARD_WIDTH = Math.min(winWidth - 32, 400);
   const CARD_HEIGHT = Math.min(winHeight * 0.62, 560);
-  const [cards, setCards] = useState<Card[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [swipeLimitError, setSwipeLimitError] = useState(false);
   const [swipeError, setSwipeError] = useState<string | null>(null);
   const [matchModal, setMatchModal] = useState<MatchModal>({ visible: false, user: null, compatibility: null, matchId: '' });
@@ -86,12 +84,23 @@ export default function DiscoverScreen() {
 
   const activeFilterCount = Object.values(filters).filter(v => v).length;
 
+  // The deck is cached per filter set and never refetched in the background — a
+  // reshuffle mid-swipe would move the card out from under the user's thumb.
+  const { data, isPending, error: loadError, refetch } = useDiscoveryCards(
+    { limit: 10, ...filters },
+    !!user
+  );
+  const cards: Card[] = data?.cards ?? [];
+
+  // A new deck (different filters, or an explicit refresh) starts at the first card.
   useEffect(() => {
-    if (user) {
-      loadCards();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, filters]);
+    setCurrentIndex(0);
+  }, [data]);
+
+  const reloadCards = useCallback(() => {
+    setCurrentIndex(0);
+    refetch();
+  }, [refetch]);
 
   const haptic = (type: 'light' | 'medium' | 'success' = 'light') => {
     if (Platform.OS === 'web') return;
@@ -99,21 +108,6 @@ export default function DiscoverScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } else {
       Haptics.impactAsync(type === 'medium' ? Haptics.ImpactFeedbackStyle.Medium : Haptics.ImpactFeedbackStyle.Light);
-    }
-  };
-
-  const loadCards = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await api.getDiscoveryCardsFiltered({ limit: 10, ...filters });
-      setCards(response.cards || []);
-      setCurrentIndex(0);
-    } catch (err: any) {
-      console.error('Load cards error:', err);
-      setError(err?.detail || err?.message || 'Failed to load profiles');
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -224,7 +218,7 @@ export default function DiscoverScreen() {
     router.push(`/profile/${userId}`);
   };
 
-  if (loading) {
+  if (isPending) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.centered}>
@@ -235,7 +229,7 @@ export default function DiscoverScreen() {
     );
   }
 
-  if (error) {
+  if (loadError) {
     return (
       <SafeAreaView style={styles.container} edges={['top']} testID="discover-error">
         <View style={styles.header}>
@@ -247,9 +241,9 @@ export default function DiscoverScreen() {
           </View>
           <Text style={styles.emptyTitle}>Couldn&apos;t load profiles</Text>
           <Text style={styles.emptyText}>
-            Something went wrong. Give it another try.
+            {(loadError as any)?.detail || 'Something went wrong. Give it another try.'}
           </Text>
-          <TouchableOpacity style={styles.reloadButton} onPress={loadCards} testID="discover-retry">
+          <TouchableOpacity style={styles.reloadButton} onPress={reloadCards} testID="discover-retry">
             <Text style={styles.reloadButtonText}>Try again</Text>
           </TouchableOpacity>
         </View>
@@ -271,7 +265,7 @@ export default function DiscoverScreen() {
           <Text style={styles.emptyText}>
             No new founders right now. We&apos;ll notify you when we curate more matches for you.
           </Text>
-          <TouchableOpacity style={styles.reloadButton} onPress={loadCards} testID="discover-reload">
+          <TouchableOpacity style={styles.reloadButton} onPress={reloadCards} testID="discover-reload">
             <Text style={styles.reloadButtonText}>Refresh</Text>
           </TouchableOpacity>
         </View>

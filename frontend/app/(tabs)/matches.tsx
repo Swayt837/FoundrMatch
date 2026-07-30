@@ -1,7 +1,7 @@
 /**
  * Matches Screen - Superhuman-inspired list
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useCallback } from 'react';
 import {
   View,
   Text,
@@ -17,7 +17,8 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Zap, Heart, ChevronRight, Rocket, Info, Sparkles, UserMinus } from 'lucide-react-native';
-import { api } from '@/src/api/client';
+import { useQueryClient } from '@tanstack/react-query';
+import { queryKeys, useMatches, useUnmatch } from '@/src/api/queries';
 import { useSocketEvent } from '@/src/hooks/use-socket-event';
 import { theme } from '@/src/theme';
 
@@ -26,45 +27,38 @@ const PLACEHOLDER = 'https://images.unsplash.com/photo-1642290687545-8ab7e600247
 export default function MatchesScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const [matches, setMatches] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const queryClient = useQueryClient();
 
-  const totalUnread = matches.reduce((sum, m) => sum + (m.unread_count || 0), 0);
+  // Cached-first: returning to this tab shows the previous list immediately and
+  // refreshes behind it, instead of a full-screen spinner every time.
+  const { data, isPending, isRefetching, refetch, error } = useMatches();
+  const unmatchMutation = useUnmatch();
 
+  const matches: any[] = data?.matches ?? [];
+  const totalUnread = data?.total_unread ?? 0;
+
+  // The list is refetched on focus because React Native has no window-focus event.
   useFocusEffect(
     useCallback(() => {
-      loadMatches();
-    }, [])
+      refetch();
+    }, [refetch])
   );
-
-  /** `silent` refreshes in place, for socket-driven updates. */
-  const loadMatches = async (silent: boolean = false) => {
-    if (!silent) setLoading(true);
-    try {
-      const response = await api.getMatches();
-      setMatches(response.matches || []);
-    } catch (error) {
-      console.error('Load matches error:', error);
-    } finally {
-      if (!silent) setLoading(false);
-    }
-  };
-
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await loadMatches();
-    setRefreshing(false);
-  };
 
   // Keep the list live: a new message, match or unmatch arrives over the socket
   // rather than waiting for the user to pull to refresh.
-  useSocketEvent('message_notification', () => loadMatches(true));
-  useSocketEvent('new_match', () => loadMatches(true));
-  useSocketEvent('match_removed', (data: { match_id?: string }) => {
-    if (data?.match_id) {
-      setMatches((prev) => prev.filter((m) => m.match_id !== data.match_id));
-    }
+  useSocketEvent('message_notification', () => refetch());
+  useSocketEvent('new_match', () => refetch());
+  useSocketEvent('match_removed', (payload: { match_id?: string }) => {
+    if (!payload?.match_id) return;
+    // Remove the row now; the server is already in that state.
+    queryClient.setQueryData<any>(queryKeys.matches, (current: any) =>
+      current
+        ? {
+            ...current,
+            matches: current.matches.filter((m: any) => m.match_id !== payload.match_id),
+          }
+        : current
+    );
   });
 
   const goToChat = (matchId: string) => {
@@ -79,15 +73,14 @@ export default function MatchesScreen() {
     const name = item.user?.profile?.name || 'this founder';
     const question = `Unmatch ${name}? This deletes the conversation and deal room for both of you.`;
 
-    const run = async () => {
-      try {
-        await api.unmatch(item.match_id);
-        setMatches((prev) => prev.filter((m) => m.match_id !== item.match_id));
-      } catch (e: any) {
-        const message = e?.detail || e?.message || 'Could not unmatch';
-        if (Platform.OS === 'web') window.alert(message);
-        else Alert.alert('Unmatch failed', message);
-      }
+    const run = () => {
+      unmatchMutation.mutate(item.match_id, {
+        onError: (e: any) => {
+          const message = e?.detail || e?.message || 'Could not unmatch';
+          if (Platform.OS === 'web') window.alert(message);
+          else Alert.alert('Unmatch failed', message);
+        },
+      });
     };
 
     if (Platform.OS === 'web') {
@@ -193,7 +186,7 @@ export default function MatchesScreen() {
     );
   };
 
-  if (loading && !refreshing) {
+  if (isPending) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.header}>
@@ -202,6 +195,28 @@ export default function MatchesScreen() {
         </View>
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={theme.colors.brand} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // A failed first load used to fall through to "No matches yet", which reads as
+  // "nobody liked you back" when the request simply failed.
+  if (error && matches.length === 0) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <View style={styles.header}>
+          <Text style={styles.eyebrow}>YOUR CONNECTIONS</Text>
+          <Text style={styles.title}>Matches</Text>
+        </View>
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyTitle}>Could not load your matches</Text>
+          <Text style={styles.emptyText}>
+            {(error as any)?.detail || 'Check your connection and try again.'}
+          </Text>
+          <TouchableOpacity style={styles.discoverButton} onPress={() => refetch()}>
+            <Text style={styles.discoverButtonText}>Retry</Text>
+          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
@@ -244,8 +259,8 @@ export default function MatchesScreen() {
           ItemSeparatorComponent={() => <View style={styles.divider} />}
           refreshControl={
             <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
+              refreshing={isRefetching}
+              onRefresh={refetch}
               tintColor={theme.colors.brand}
             />
           }

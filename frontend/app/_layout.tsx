@@ -14,7 +14,18 @@ import { theme } from '@/src/theme';
 
 SplashScreen.preventAutoHideAsync();
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      // React Native has no window focus event, so refetch-on-focus is handled by
+      // the screens that need it (via useFocusEffect + refetch) rather than here.
+      refetchOnWindowFocus: false,
+      // A 401 clears the session and routes to sign-in; retrying it just delays that.
+      retry: (failureCount, error: any) => failureCount < 2 && error?.status !== 401,
+      staleTime: 30_000,
+    },
+  },
+});
 
 const prewarmAssets = async () => {
   try {

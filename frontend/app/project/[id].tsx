@@ -23,7 +23,12 @@ import {
   ArrowLeft, Briefcase, Clock, TrendingUp, Users, Check, Send, Lock,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
-import { api } from '@/src/api/client';
+import {
+  useApplyToProject,
+  useProject,
+  useProjectApplicants,
+  useSetProjectStatus,
+} from '@/src/api/queries';
 import { theme } from '@/src/theme';
 
 const PLACEHOLDER =
@@ -34,67 +39,52 @@ export default function ProjectDetailScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  const [project, setProject] = useState<any>(null);
-  const [applicants, setApplicants] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
-  const [applying, setApplying] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Errors raised by an action, as opposed to the query's own load error.
+  const [actionError, setActionError] = useState<string | null>(null);
 
+  const { data: project, isPending, error: loadError, refetch } = useProject(id);
+  // Only the owner is allowed to see who applied, so the request is gated on that
+  // rather than fired and left to 403.
+  const { data: applicantsData } = useProjectApplicants(id, !!project?.is_owner);
+  const applyMutation = useApplyToProject(id!);
+  const statusMutation = useSetProjectStatus(id!);
+
+  const applicants: any[] = applicantsData?.applicants ?? [];
+  const applying = applyMutation.isPending;
+  const error =
+    actionError || (loadError ? (loadError as any)?.detail || 'Could not load this opportunity' : null);
+
+  // Coming back from the applicant's profile should reflect any change made there.
   useFocusEffect(
     useCallback(() => {
-      if (id) load();
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [id])
+      if (id) refetch();
+    }, [id, refetch])
   );
 
-  const load = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await api.getProject(id!);
-      setProject(data);
-      // Only the owner is allowed to see who applied.
-      if (data.is_owner) {
-        const response = await api.getProjectApplicants(id!);
-        setApplicants(response.applicants || []);
-      }
-    } catch (e: any) {
-      setError(e?.detail || e?.message || 'Could not load this opportunity');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const apply = async () => {
+  const apply = () => {
     if (applying) return;
-    setApplying(true);
-    setError(null);
-    try {
-      await api.applyToProject(id!, message.trim());
-      if (Platform.OS !== 'web') {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      }
-      setMessage('');
-      await load();
-    } catch (e: any) {
-      setError(e?.detail || e?.message || 'Could not send your application');
-    } finally {
-      setApplying(false);
-    }
+    setActionError(null);
+    applyMutation.mutate(message.trim(), {
+      onSuccess: () => {
+        if (Platform.OS !== 'web') {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        }
+        setMessage('');
+      },
+      onError: (e: any) =>
+        setActionError(e?.detail || e?.message || 'Could not send your application'),
+    });
   };
 
-  const toggleStatus = async () => {
-    const next = project.status === 'open' ? 'closed' : 'open';
-    try {
-      await api.setProjectStatus(id!, next);
-      setProject({ ...project, status: next });
-    } catch (e: any) {
-      setError(e?.detail || e?.message || 'Could not update status');
-    }
+  const toggleStatus = () => {
+    setActionError(null);
+    statusMutation.mutate(project.status === 'open' ? 'closed' : 'open', {
+      onError: (e: any) => setActionError(e?.detail || e?.message || 'Could not update status'),
+    });
   };
 
-  if (loading) {
+  if (isPending) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.centered}>
@@ -214,7 +204,7 @@ export default function ProjectDetailScreen() {
           )}
 
           {error && (
-            <TouchableOpacity style={styles.errorBanner} onPress={() => setError(null)}>
+            <TouchableOpacity style={styles.errorBanner} onPress={() => setActionError(null)}>
               <Text style={styles.errorText}>{error}</Text>
             </TouchableOpacity>
           )}

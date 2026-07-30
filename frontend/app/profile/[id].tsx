@@ -1,7 +1,7 @@
 /**
  * Profile Detail Screen - Full-screen premium profile view
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -36,6 +36,11 @@ import {
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { api, ApiError } from '@/src/api/client';
+import {
+  useCompatibility,
+  useCompatibilityReport,
+  useUserProfile,
+} from '@/src/api/queries';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { theme } from '@/src/theme';
 
@@ -50,75 +55,36 @@ export default function ProfileDetailScreen() {
 
   const { user: me } = useAuth();
 
-  const [profile, setProfile] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [activePhoto, setActivePhoto] = useState(0);
-
-  // Compatibility loads separately: the profile should render immediately, while
-  // the AI narrative behind the score takes a moment.
-  const [compat, setCompat] = useState<any>(null);
-  const [compatLoading, setCompatLoading] = useState(false);
-
-  const [report, setReport] = useState<any>(null);
-  const [reportLoading, setReportLoading] = useState(false);
+  // Errors raised by an action (block, report), as opposed to a failed load.
+  const [actionError, setActionError] = useState<string | null>(null);
   const [reportError, setReportError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (id) {
-      load();
-      loadCompatibility();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  const { data: profile, isPending: loading, error: loadError, refetch } = useUserProfile(id);
 
-  const load = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await api.getUserProfile(id as string);
-      // Backend returns { user_id, profile: {name, bio, city, ...}, premium, ... }
-      // Flatten profile fields to top level for easier rendering, keeping the
-      // root-level fields the UI needs (premium drives the badge).
-      const flat = data?.profile
-        ? { user_id: data.user_id, premium: data.premium, ...data.profile }
-        : data;
-      setProfile(flat);
-    } catch (err: any) {
-      setError(err?.detail || err?.message || 'Failed to load profile');
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Compatibility is a separate query so the profile renders immediately while the
+  // narrative behind the score is still in flight.
+  const { data: compat, isPending: compatLoading } = useCompatibility(id);
 
-  const loadCompatibility = async () => {
-    setCompatLoading(true);
-    try {
-      setCompat(await api.getCompatibility(id as string));
-    } catch {
-      // Non-blocking: the profile is still worth showing without the breakdown.
-      setCompat(null);
-    } finally {
-      setCompatLoading(false);
-    }
-  };
+  const reportMutation = useCompatibilityReport(id);
+  const report = reportMutation.data?.report;
+  const reportLoading = reportMutation.isPending;
 
-  const loadReport = async () => {
+  const error =
+    actionError || (loadError ? (loadError as any)?.detail || 'Failed to load profile' : null);
+
+  const loadReport = () => {
     if (reportLoading) return;
-    setReportLoading(true);
     setReportError(null);
-    try {
-      const data = await api.getCompatibilityReport(id as string);
-      setReport(data.report);
-    } catch (e: any) {
-      if (e instanceof ApiError && e.isPaymentRequired) {
-        router.push('/premium');
-        return;
-      }
-      setReportError(e?.detail || e?.message || 'Could not generate the report');
-    } finally {
-      setReportLoading(false);
-    }
+    reportMutation.mutate(undefined, {
+      onError: (e: any) => {
+        if (e instanceof ApiError && e.isPaymentRequired) {
+          router.push('/premium');
+          return;
+        }
+        setReportError(e?.detail || e?.message || 'Could not generate the report');
+      },
+    });
   };
 
   const reportOrBlock = () => {
@@ -129,7 +95,7 @@ export default function ProfileDetailScreen() {
         await api.blockUser(id as string);
         router.back();
       } catch (e: any) {
-        setError(e?.detail || e?.message || 'Could not block');
+        setActionError(e?.detail || e?.message || 'Could not block');
       }
     };
 
@@ -138,7 +104,7 @@ export default function ProfileDetailScreen() {
         await api.reportUser(id as string, 'inappropriate_content', '', true);
         router.back();
       } catch (e: any) {
-        setError(e?.detail || e?.message || 'Could not report');
+        setActionError(e?.detail || e?.message || 'Could not report');
       }
     };
 
@@ -199,7 +165,7 @@ export default function ProfileDetailScreen() {
         <SafeAreaView style={styles.centered} edges={['top']}>
           <Text style={styles.errorTitle}>Couldn&apos;t load profile</Text>
           <Text style={styles.errorText}>{error || 'Profile not found'}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={load}>
+          <TouchableOpacity style={styles.retryButton} onPress={() => refetch()}>
             <Text style={styles.retryText}>Try again</Text>
           </TouchableOpacity>
         </SafeAreaView>

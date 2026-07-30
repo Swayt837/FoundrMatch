@@ -24,6 +24,14 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { ArrowLeft, Bell, Eye, MapPin, ShieldOff, Sparkles, Trash2 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { api } from '@/src/api/client';
+import {
+  useBlockedUsers,
+  useCancelSubscription,
+  usePremiumStatus,
+  useSettings,
+  useUnblockUser,
+  useUpdateSettings,
+} from '@/src/api/queries';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { theme } from '@/src/theme';
 
@@ -41,79 +49,60 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const { signOut, refreshUser } = useAuth();
 
-  const [settings, setSettings] = useState<Settings | null>(null);
-  const [premium, setPremium] = useState<any>(null);
-  const [blocked, setBlocked] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [distanceDraft, setDistanceDraft] = useState('');
+  // The distance input is a free-text draft until it is committed, so it needs its
+  // own state; everything else reads straight from the cache.
+  const [distanceDraft, setDistanceDraft] = useState<string | null>(null);
 
+  const { data: settingsData, isPending: loading, error: loadError, refetch } = useSettings();
+  const { data: blockedData } = useBlockedUsers();
+  const { data: premium } = usePremiumStatus();
+
+  const settings: Settings | null = settingsData ?? null;
+  const blocked: any[] = blockedData?.blocked ?? [];
+
+  const updateMutation = useUpdateSettings();
+  const unblockMutation = useUnblockUser();
+  const cancelMutation = useCancelSubscription();
+
+  const saving = updateMutation.isPending;
+  const distanceValue = distanceDraft ?? String(settings?.distance_preference ?? 100);
+
+  // Returning from Premium checkout or a profile block should be reflected here.
   useFocusEffect(
     useCallback(() => {
-      load();
-    }, [])
+      refetch();
+    }, [refetch])
   );
-
-  const load = async () => {
-    setLoading(true);
-    try {
-      const [settingsResponse, blockedResponse, premiumResponse] = await Promise.all([
-        api.getSettings(),
-        api.getBlockedUsers(),
-        api.premiumMe().catch(() => null),
-      ]);
-      setSettings(settingsResponse);
-      setDistanceDraft(String(settingsResponse.distance_preference ?? 100));
-      setBlocked(blockedResponse.blocked || []);
-      setPremium(premiumResponse);
-    } catch (e: any) {
-      setError(e?.detail || e?.message || 'Could not load settings');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const haptic = () => {
     if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
 
-  /** Optimistic toggle: revert the switch if the request fails. */
-  const patch = async (updates: Partial<Settings>) => {
+  /** Optimistic toggle: the hook reverts the cache if the request fails. */
+  const patch = (updates: Partial<Settings>) => {
     if (!settings) return;
-    const previous = settings;
-    setSettings({ ...settings, ...updates });
-    setSaving(true);
     setError(null);
-    try {
-      const saved = await api.updateSettings(updates);
-      setSettings(saved);
-      await refreshUser();
-    } catch (e: any) {
-      setSettings(previous);
-      setError(e?.detail || e?.message || 'Could not save');
-    } finally {
-      setSaving(false);
-    }
+    updateMutation.mutate(updates as Record<string, unknown>, {
+      // Settings feed the tab bar badge and the profile header, so the auth user
+      // has to be refreshed too.
+      onSuccess: () => refreshUser(),
+      onError: (e: any) => setError(e?.detail || e?.message || 'Could not save'),
+    });
   };
 
   const commitDistance = () => {
-    const parsed = parseInt(distanceDraft, 10);
-    if (Number.isNaN(parsed) || parsed < 0) {
-      setDistanceDraft(String(settings?.distance_preference ?? 100));
-      return;
-    }
+    const parsed = parseInt(distanceValue, 10);
+    setDistanceDraft(null);
+    if (Number.isNaN(parsed) || parsed < 0) return;
     if (parsed !== settings?.distance_preference) patch({ distance_preference: parsed });
   };
 
-  const unblock = async (userId: string) => {
+  const unblock = (userId: string) => {
     haptic();
-    try {
-      await api.unblockUser(userId);
-      setBlocked((prev) => prev.filter((b) => b.user?.user_id !== userId));
-    } catch (e: any) {
-      setError(e?.detail || e?.message || 'Could not unblock');
-    }
+    unblockMutation.mutate(userId, {
+      onError: (e: any) => setError(e?.detail || e?.message || 'Could not unblock'),
+    });
   };
 
   const confirmCancelSubscription = () => {
@@ -122,14 +111,12 @@ export default function SettingsScreen() {
       : 'the end of your current period';
     const message = `Your subscription stops renewing. You keep Premium until ${until}.`;
 
-    const run = async () => {
-      try {
-        await api.cancelSubscription();
-        await load();
-        await refreshUser();
-      } catch (e: any) {
-        setError(e?.detail || e?.message || 'Could not cancel the subscription');
-      }
+    const run = () => {
+      cancelMutation.mutate(undefined, {
+        onSuccess: () => refreshUser(),
+        onError: (e: any) =>
+          setError(e?.detail || e?.message || 'Could not cancel the subscription'),
+      });
     };
 
     if (Platform.OS === 'web') {
@@ -187,9 +174,11 @@ export default function SettingsScreen() {
           contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 48 }]}
           showsVerticalScrollIndicator={false}
         >
-          {error && (
+          {(error || loadError) && (
             <TouchableOpacity style={styles.errorBanner} onPress={() => setError(null)}>
-              <Text style={styles.errorText}>{error}</Text>
+              <Text style={styles.errorText}>
+                {error || (loadError as any)?.detail || 'Could not load settings'}
+              </Text>
             </TouchableOpacity>
           )}
 
@@ -233,7 +222,7 @@ export default function SettingsScreen() {
               </View>
               <TextInput
                 style={styles.distanceInput}
-                value={distanceDraft}
+                value={distanceValue}
                 onChangeText={setDistanceDraft}
                 onBlur={commitDistance}
                 onSubmitEditing={commitDistance}

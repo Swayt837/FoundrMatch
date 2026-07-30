@@ -1,7 +1,7 @@
 /**
  * Premium Paywall Screen — Lifetime + Monthly
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -29,6 +29,7 @@ import {
   Check,
 } from 'lucide-react-native';
 import { api } from '@/src/api/client';
+import { usePremiumPlans } from '@/src/api/queries';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { theme } from '@/src/theme';
 
@@ -71,30 +72,24 @@ export default function PremiumScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
-  const [selectedPlan, setSelectedPlan] = useState<'lifetime' | 'monthly'>('lifetime');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pickedPlan, setPickedPlan] = useState<'lifetime' | 'monthly' | null>(null);
 
   // Plans come from the backend rather than being hardcoded here, so the paywall
   // can't advertise a plan the server isn't configured to sell — the monthly plan
   // needs a Stripe Price object to actually recur.
-  const [plans, setPlans] = useState<Plan[] | null>(null);
+  const { data: plansData } = usePremiumPlans();
+  const plans: Plan[] | null = plansData
+    ? (plansData.plans || []).filter((p: Plan) => p.available)
+    : null;
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const response = await api.getPremiumPlans();
-        const available: Plan[] = (response.plans || []).filter((p: Plan) => p.available);
-        setPlans(available);
-        if (available.length && !available.some((p) => p.id === selectedPlan)) {
-          setSelectedPlan(available[0].id as 'lifetime' | 'monthly');
-        }
-      } catch {
-        setPlans([]);
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // The selection is derived rather than synced in an effect: whatever the user
+  // picked, falling back to the first plan the server actually sells.
+  const selectedPlan: 'lifetime' | 'monthly' =
+    pickedPlan && plans?.some((p) => p.id === pickedPlan)
+      ? pickedPlan
+      : ((plans?.[0]?.id as 'lifetime' | 'monthly') ?? 'lifetime');
 
   const planById = (id: string) => plans?.find((p) => p.id === id);
   const priceLabel = (plan?: Plan) => {
@@ -236,7 +231,7 @@ export default function PremiumScreen() {
                   style={[styles.planCard, selectedPlan === plan.id && styles.planCardSelected]}
                   onPress={() => {
                     haptic();
-                    setSelectedPlan(plan.id as 'lifetime' | 'monthly');
+                    setPickedPlan(plan.id as 'lifetime' | 'monthly');
                   }}
                   activeOpacity={0.85}
                   testID={`premium-plan-${plan.id}`}
