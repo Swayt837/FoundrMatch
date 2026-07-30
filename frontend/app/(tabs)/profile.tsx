@@ -16,9 +16,10 @@ import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   Settings, LogOut, Award, TrendingUp, Briefcase,
-  MapPin, Clock, Zap, Star, Shield, Sparkles, Edit3
+  MapPin, Clock, Zap, Star, Shield, Sparkles, Edit3, Brain, Check
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
+import { usePersonalityAssessment } from '@/src/api/queries';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { theme } from '@/src/theme';
 
@@ -28,6 +29,11 @@ export default function ProfileScreen() {
   const { user, signOut } = useAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+
+  const { data: assessment } = usePersonalityAssessment();
+  // "Done" means the questionnaire was fully answered — a partial submission still
+  // helps the score, but the prompt should keep nudging until it's complete.
+  const assessmentDone = (assessment?.completeness ?? 0) >= 1;
 
   const handleLogout = async () => {
     if (Platform.OS !== 'web') {
@@ -204,6 +210,34 @@ export default function ProfileScreen() {
           </View>
         )}
 
+        {/* Personality assessment — the only place the user can influence the
+            "working chemistry" dimension of their compatibility scores. */}
+        <View style={styles.section}>
+          <TouchableOpacity
+            style={styles.assessmentCard}
+            onPress={() => router.push('/assessment/personality')}
+            activeOpacity={0.85}
+            testID="profile-assessment-cta"
+          >
+            <View style={styles.assessmentIcon}>
+              <Brain size={20} color={theme.colors.brand} strokeWidth={1.75} />
+            </View>
+            <View style={styles.premiumContent}>
+              <Text style={styles.assessmentTitle}>
+                {assessmentDone ? 'Founder assessment complete' : 'Take the founder assessment'}
+              </Text>
+              <Text style={styles.assessmentDesc}>
+                {assessmentDone
+                  ? 'Your traits are factored into every compatibility score. Tap to review.'
+                  : 'Ten questions, two minutes. It sharpens how well we can judge your fit with other founders.'}
+              </Text>
+            </View>
+            {assessmentDone && (
+              <Check size={16} color={theme.colors.brand} strokeWidth={2.5} />
+            )}
+          </TouchableOpacity>
+        </View>
+
         {/* Premium CTA */}
         <View style={styles.section}>
           {user?.premium ? (
@@ -262,6 +296,30 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: theme.colors.surface,
+  },
+  assessmentCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.md,
+    padding: theme.spacing.lg,
+    borderRadius: theme.radius.md,
+    backgroundColor: theme.colors.surfaceSecondary,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  assessmentIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.colors.brandTertiary,
+  },
+  assessmentTitle: { ...theme.typography.headline, color: theme.colors.text, marginBottom: 2 },
+  assessmentDesc: {
+    ...theme.typography.caption,
+    color: theme.colors.textSecondary,
+    lineHeight: 17,
   },
   hero: {
     height: 380,

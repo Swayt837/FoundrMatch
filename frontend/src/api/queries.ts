@@ -35,6 +35,8 @@ export const queryKeys = {
   blocked: ['blocked'] as const,
   premium: ['premium'] as const,
   premiumPlans: ['premium', 'plans'] as const,
+  dealRoom: (matchId: string) => ['deal-room', matchId] as const,
+  personality: ['assessment', 'personality'] as const,
 };
 
 /** Matches move often (new message, unread count), so keep them fresh-ish. */
@@ -193,6 +195,132 @@ export function usePremiumStatus() {
     queryKey: queryKeys.premium,
     queryFn: () => api.premiumMe(),
     staleTime: 60_000,
+  });
+}
+
+/**
+ * The deal room for a match.
+ *
+ * Everything in the room (tasks, documents, decisions, equity) lives in one
+ * document, so every mutation below just invalidates this one query rather than
+ * patching six slices of cache by hand.
+ */
+export function useDealRoom(matchId?: string) {
+  return useQuery({
+    queryKey: queryKeys.dealRoom(matchId ?? ''),
+    queryFn: () => api.getDealRoomByMatch(matchId as string),
+    enabled: !!matchId,
+    select: (data: any) => data?.room ?? null,
+  });
+}
+
+/**
+ * Mutations against a room. Grouped in one hook because they all invalidate the
+ * same query and every caller needs several of them.
+ */
+export function useDealRoomActions(matchId: string, roomId?: string) {
+  const queryClient = useQueryClient();
+  const invalidate = () =>
+    queryClient.invalidateQueries({ queryKey: queryKeys.dealRoom(matchId) });
+
+  const create = useMutation({
+    mutationFn: (payload: { projectName: string; vision: string }) =>
+      api.createDealRoom(matchId, payload.projectName, payload.vision),
+    onSuccess: (room: any) =>
+      // The response *is* the room, so seed the cache with it instead of making
+      // the screen wait for a refetch before it can render.
+      queryClient.setQueryData(queryKeys.dealRoom(matchId), { room }),
+  });
+
+  const addTask = useMutation({
+    mutationFn: (title: string) => api.addTask(roomId as string, title),
+    onSuccess: invalidate,
+  });
+
+  const toggleTask = useMutation({
+    mutationFn: (taskId: string) => api.toggleTask(roomId as string, taskId),
+    onSuccess: invalidate,
+  });
+
+  const generateRoadmap = useMutation({
+    mutationFn: () => api.generateRoadmap(roomId as string),
+    onSuccess: invalidate,
+  });
+
+  const addDocument = useMutation({
+    mutationFn: (document: { title: string; url: string; doc_type?: string }) =>
+      api.addDealRoomDocument(roomId as string, document),
+    onSuccess: invalidate,
+  });
+
+  const removeDocument = useMutation({
+    mutationFn: (documentId: string) =>
+      api.removeDealRoomDocument(roomId as string, documentId),
+    onSuccess: invalidate,
+  });
+
+  const addDecision = useMutation({
+    mutationFn: (payload: { title: string; detail?: string }) =>
+      api.addDealRoomDecision(roomId as string, payload.title, payload.detail ?? ''),
+    onSuccess: invalidate,
+  });
+
+  const agreeToDecision = useMutation({
+    mutationFn: (decisionId: string) => api.agreeToDecision(roomId as string, decisionId),
+    onSuccess: invalidate,
+  });
+
+  const proposeEquity = useMutation({
+    mutationFn: (proposal: {
+      splits: Record<string, number>;
+      vesting_months?: number;
+      cliff_months?: number;
+      notes?: string;
+    }) => api.proposeEquity(roomId as string, proposal),
+    onSuccess: invalidate,
+  });
+
+  const acceptEquity = useMutation({
+    mutationFn: () => api.acceptEquity(roomId as string),
+    onSuccess: invalidate,
+  });
+
+  return {
+    create,
+    addTask,
+    toggleTask,
+    generateRoadmap,
+    addDocument,
+    removeDocument,
+    addDecision,
+    agreeToDecision,
+    proposeEquity,
+    acceptEquity,
+  };
+}
+
+/** Questionnaire plus the current user's own answers, so it stays editable. */
+export function usePersonalityAssessment() {
+  return useQuery({
+    queryKey: queryKeys.personality,
+    queryFn: () => api.getPersonalityAssessment(),
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useSubmitPersonalityAssessment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (answers: Record<string, number>) =>
+      api.submitPersonalityAssessment(answers),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.personality });
+      // The assessment feeds `personality_score`, so every score on screen is now
+      // out of date.
+      queryClient.invalidateQueries({ queryKey: queryKeys.matches });
+      queryClient.invalidateQueries({ queryKey: ['discovery'] });
+      queryClient.invalidateQueries({ queryKey: ['compatibility'] });
+    },
   });
 }
 

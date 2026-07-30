@@ -1,113 +1,230 @@
 /**
  * Deal Room - Premium collaboration space
- * Tabs: Overview / Tasks / Roadmap
+ * Tabs: Overview / Tasks / Roadmap / Documents / Decisions / Equity
+ *
+ * The last three complete the PRD's workspace. They are not three more note lists:
+ *
+ * - **Documents** are links out to where the work actually lives (Drive, Notion,
+ *   Figma). There is no object storage here, and base64-ing a deck into the room
+ *   document is how you hit MongoDB's 16 MB limit.
+ * - **Decisions** and **Equity** both require sign-off from both founders, which is
+ *   the whole point: a decision log neither party agreed to proves nothing, and an
+ *   equity split that does not add up to 100% is worse than no split at all. The
+ *   server enforces both; this screen only surfaces the state.
  */
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  ActivityIndicator, TextInput, KeyboardAvoidingView, Platform, Modal,
+  ActivityIndicator, TextInput, KeyboardAvoidingView, Platform, Linking,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ArrowLeft, Plus, Check, Target, ListChecks, Route,
-  Sparkles, Zap, Milestone, TrendingUp,
+  Sparkles, Milestone, TrendingUp, FileText, Gavel, PieChart,
+  ExternalLink, Trash2, Clock3,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
-import { api } from '@/src/api/client';
+import { ApiError } from '@/src/api/client';
+import { useDealRoom, useDealRoomActions } from '@/src/api/queries';
+import { useAuth } from '@/src/contexts/AuthContext';
 import { theme } from '@/src/theme';
 
-type TabKey = 'overview' | 'tasks' | 'roadmap';
+type TabKey = 'overview' | 'tasks' | 'roadmap' | 'documents' | 'decisions' | 'equity';
+
+const DOC_TYPES = [
+  { value: 'pitch_deck', label: 'Deck' },
+  { value: 'legal', label: 'Legal' },
+  { value: 'financial', label: 'Finance' },
+  { value: 'product', label: 'Product' },
+  { value: 'other', label: 'Other' },
+];
 
 export default function DealRoomScreen() {
   const { matchId } = useLocalSearchParams<{ matchId: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  
+  const { user } = useAuth();
+  const myId = user?.user_id;
+
   const [tab, setTab] = useState<TabKey>('overview');
-  const [room, setRoom] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [showCreate, setShowCreate] = useState(false);
   const [projectName, setProjectName] = useState('');
   const [vision, setVision] = useState('');
-  const [creating, setCreating] = useState(false);
   const [newTaskTitle, setNewTaskTitle] = useState('');
-  const [generatingRoadmap, setGeneratingRoadmap] = useState(false);
+  const [docTitle, setDocTitle] = useState('');
+  const [docUrl, setDocUrl] = useState('');
+  const [docType, setDocType] = useState('other');
+  const [decisionTitle, setDecisionTitle] = useState('');
+  const [decisionDetail, setDecisionDetail] = useState('');
+  const [myShare, setMyShare] = useState<string | null>(null);
+  const [vesting, setVesting] = useState<string | null>(null);
+  const [cliff, setCliff] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (matchId) loadRoom();
-  }, [matchId]);
+  const { data: room, isPending: loading, refetch } = useDealRoom(matchId);
+  const actions = useDealRoomActions(matchId!, room?.room_id);
 
-  const loadRoom = async () => {
-    setLoading(true);
-    try {
-      const resp = await api.getDealRoomByMatch(matchId!);
-      setRoom(resp.room);
-      if (!resp.room) setShowCreate(true);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
-  };
+  // The other founder may act on the room while it is open.
+  useFocusEffect(
+    useCallback(() => {
+      if (matchId) refetch();
+    }, [matchId, refetch])
+  );
 
   const haptic = () => {
     if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
 
-  const createRoom = async () => {
-    if (!projectName.trim() || !vision.trim()) return;
-    setCreating(true);
-    try {
-      haptic();
-      const newRoom = await api.createDealRoom(matchId!, projectName.trim(), vision.trim());
-      setRoom(newRoom);
-      setShowCreate(false);
-      setProjectName('');
-      setVision('');
-    } catch (e: any) {
-      console.error(e);
-    } finally {
-      setCreating(false);
-    }
+  const fail = (fallback: string) => (e: any) =>
+    setError(e?.detail || e?.message || fallback);
+
+  const otherId: string | undefined = useMemo(
+    () => (room?.participants || []).find((id: string) => id !== myId),
+    [room?.participants, myId]
+  );
+
+  const nameOf = (userId?: string) => {
+    if (!userId) return 'Cofounder';
+    if (userId === myId) return 'You';
+    return room?.participant_profiles?.[userId]?.name || 'Your cofounder';
   };
 
-  const addTask = async () => {
+  // Equity state: the standing proposal from the server, plus any local edits.
+  const equity = room?.equity_split || {};
+  const equityProposed = !!equity.splits;
+  const myEquityShare = myId ? equity.splits?.[myId] : undefined;
+  const equityDraft = {
+    mine: myShare ?? (myEquityShare != null ? String(myEquityShare) : '50'),
+    vesting: vesting ?? String(equity.vesting_months ?? 48),
+    cliff: cliff ?? String(equity.cliff_months ?? 12),
+  };
+  const iAcceptedEquity = !!myId && (equity.agreed_by || []).includes(myId);
+
+  const createRoom = () => {
+    if (!projectName.trim() || !vision.trim()) return;
+    haptic();
+    setError(null);
+    actions.create.mutate(
+      { projectName: projectName.trim(), vision: vision.trim() },
+      {
+        onSuccess: () => {
+          setProjectName('');
+          setVision('');
+        },
+        onError: (e: any) => {
+          // Deal rooms are a Premium feature; a 402 is a paywall, not a failure.
+          if (e instanceof ApiError && e.isPaymentRequired) {
+            router.push('/premium');
+            return;
+          }
+          fail('Could not open the deal room')(e);
+        },
+      }
+    );
+  };
+
+  const addTask = () => {
     const title = newTaskTitle.trim();
     if (!title || !room) return;
     haptic();
-    try {
-      await api.addTask(room.room_id, title);
-      setNewTaskTitle('');
-      loadRoom();
-    } catch (e) {
-      console.error(e);
-    }
+    setError(null);
+    actions.addTask.mutate(title, {
+      onSuccess: () => setNewTaskTitle(''),
+      onError: fail('Could not add the task'),
+    });
   };
 
-  const toggleTask = async (taskId: string) => {
+  const toggleTask = (taskId: string) => {
     if (!room) return;
     haptic();
-    try {
-      await api.toggleTask(room.room_id, taskId);
-      loadRoom();
-    } catch (e) {
-      console.error(e);
-    }
+    actions.toggleTask.mutate(taskId, { onError: fail('Could not update the task') });
   };
 
-  const generateRoadmap = async () => {
+  const generateRoadmap = () => {
     if (!room) return;
-    setGeneratingRoadmap(true);
-    try {
-      haptic();
-      await api.generateRoadmap(room.room_id);
-      loadRoom();
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setGeneratingRoadmap(false);
+    haptic();
+    setError(null);
+    actions.generateRoadmap.mutate(undefined, {
+      onError: fail('Roadmap generation failed'),
+    });
+  };
+
+  const addDocument = () => {
+    const title = docTitle.trim();
+    const url = docUrl.trim();
+    if (!title || !url) return;
+    haptic();
+    setError(null);
+    actions.addDocument.mutate(
+      { title, url, doc_type: docType },
+      {
+        onSuccess: () => {
+          setDocTitle('');
+          setDocUrl('');
+          setDocType('other');
+        },
+        onError: fail('Could not add the document'),
+      }
+    );
+  };
+
+  const openDocument = (url: string) => {
+    // Never rendered as a raw anchor: the server only stores http(s) links, and
+    // this keeps the same guarantee on the client.
+    if (!/^https?:\/\//i.test(url)) return;
+    Linking.openURL(url).catch(() => setError('Could not open that link'));
+  };
+
+  const addDecision = () => {
+    const title = decisionTitle.trim();
+    if (!title) return;
+    haptic();
+    setError(null);
+    actions.addDecision.mutate(
+      { title, detail: decisionDetail.trim() },
+      {
+        onSuccess: () => {
+          setDecisionTitle('');
+          setDecisionDetail('');
+        },
+        onError: fail('Could not record the decision'),
+      }
+    );
+  };
+
+  const proposeEquity = () => {
+    if (!room || !myId || !otherId) return;
+    const mine = parseFloat(equityDraft.mine);
+    if (Number.isNaN(mine) || mine < 0 || mine > 100) {
+      setError('Enter your share as a number between 0 and 100');
+      return;
     }
+    haptic();
+    setError(null);
+    actions.proposeEquity.mutate(
+      {
+        // The other share is derived rather than typed, so the total can never be
+        // anything but 100 — the server rejects the alternative, and making the user
+        // discover that by validation error would be poor design.
+        splits: { [myId]: mine, [otherId]: Math.round((100 - mine) * 100) / 100 },
+        vesting_months: parseInt(equityDraft.vesting, 10) || 0,
+        cliff_months: parseInt(equityDraft.cliff, 10) || 0,
+      },
+      {
+        onSuccess: () => {
+          setMyShare(null);
+          setVesting(null);
+          setCliff(null);
+        },
+        onError: fail('Could not save the split'),
+      }
+    );
+  };
+
+  const acceptEquity = () => {
+    haptic();
+    setError(null);
+    actions.acceptEquity.mutate(undefined, { onError: fail('Could not accept the split') });
   };
 
   if (loading) {
@@ -120,8 +237,8 @@ export default function DealRoomScreen() {
     );
   }
 
-  // Create modal (when no room exists)
-  if (showCreate || !room) {
+  // Create view (when no room exists yet)
+  if (!room) {
     return (
       <SafeAreaView style={styles.container} edges={['top']} testID="dealroom-create">
         <KeyboardAvoidingView
@@ -140,8 +257,16 @@ export default function DealRoomScreen() {
 
           <ScrollView contentContainerStyle={styles.createContent} keyboardShouldPersistTaps="handled">
             <Text style={styles.introText}>
-              Your Deal Room is a private space to plan, track and ship your startup together.
+              Your Deal Room is a private space to plan, track and ship your startup
+              together — tasks, an AI roadmap, shared documents, a decision log and your
+              equity split.
             </Text>
+
+            {error && (
+              <TouchableOpacity style={styles.errorBanner} onPress={() => setError(null)}>
+                <Text style={styles.errorBannerText}>{error}</Text>
+              </TouchableOpacity>
+            )}
 
             <View style={styles.fieldsGroup}>
               <View style={styles.inputGroup}>
@@ -170,13 +295,16 @@ export default function DealRoomScreen() {
               </View>
 
               <TouchableOpacity
-                style={[styles.ctaButton, (creating || !projectName || !vision) && styles.buttonDisabled]}
+                style={[
+                  styles.ctaButton,
+                  (actions.create.isPending || !projectName || !vision) && styles.buttonDisabled,
+                ]}
                 onPress={createRoom}
-                disabled={creating || !projectName || !vision}
+                disabled={actions.create.isPending || !projectName || !vision}
                 activeOpacity={0.85}
                 testID="dealroom-create-submit"
               >
-                {creating ? (
+                {actions.create.isPending ? (
                   <ActivityIndicator color={theme.colors.brandOn} />
                 ) : (
                   <>
@@ -195,6 +323,8 @@ export default function DealRoomScreen() {
   const tasks = room.tasks || [];
   const completedCount = tasks.filter((t: any) => t.completed).length;
   const roadmap = room.roadmap || {};
+  const documents = room.documents || [];
+  const decisions = room.decisions || [];
 
   return (
     <SafeAreaView style={styles.container} edges={['top']} testID="dealroom-screen">
@@ -208,12 +338,21 @@ export default function DealRoomScreen() {
         </View>
       </View>
 
-      {/* Tabs */}
-      <View style={styles.tabs}>
+      {/* Tabs — six of them, so the row scrolls rather than squeezing each label
+          down to an unreadable width on a small phone. */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.tabs}
+        contentContainerStyle={styles.tabsContent}
+      >
         {[
           { key: 'overview', label: 'Overview', icon: Target },
           { key: 'tasks', label: 'Tasks', icon: ListChecks },
           { key: 'roadmap', label: 'Roadmap', icon: Route },
+          { key: 'documents', label: 'Docs', icon: FileText },
+          { key: 'decisions', label: 'Decisions', icon: Gavel },
+          { key: 'equity', label: 'Equity', icon: PieChart },
         ].map(t => {
           const Icon = t.icon;
           const active = tab === t.key;
@@ -229,7 +368,13 @@ export default function DealRoomScreen() {
             </TouchableOpacity>
           );
         })}
-      </View>
+      </ScrollView>
+
+      {error && (
+        <TouchableOpacity style={styles.errorBanner} onPress={() => setError(null)}>
+          <Text style={styles.errorBannerText}>{error}</Text>
+        </TouchableOpacity>
+      )}
 
       <ScrollView
         style={styles.flex}
@@ -327,6 +472,360 @@ export default function DealRoomScreen() {
           </View>
         )}
 
+        {tab === 'documents' && (
+          <View style={styles.section}>
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Add a document</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Title — e.g. Seed deck v3"
+                placeholderTextColor={theme.colors.textSecondary}
+                value={docTitle}
+                onChangeText={setDocTitle}
+                testID="dealroom-doc-title"
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="https://..."
+                placeholderTextColor={theme.colors.textSecondary}
+                value={docUrl}
+                onChangeText={setDocUrl}
+                autoCapitalize="none"
+                keyboardType="url"
+                testID="dealroom-doc-url"
+              />
+              <View style={styles.chipsRow}>
+                {DOC_TYPES.map((type) => (
+                  <TouchableOpacity
+                    key={type.value}
+                    style={[styles.typeChip, docType === type.value && styles.typeChipOn]}
+                    onPress={() => setDocType(type.value)}
+                    testID={`dealroom-doc-type-${type.value}`}
+                  >
+                    <Text
+                      style={[
+                        styles.typeChipText,
+                        docType === type.value && styles.typeChipTextOn,
+                      ]}
+                    >
+                      {type.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <TouchableOpacity
+                style={[
+                  styles.ctaButton,
+                  (actions.addDocument.isPending || !docTitle.trim() || !docUrl.trim()) &&
+                    styles.buttonDisabled,
+                ]}
+                onPress={addDocument}
+                disabled={actions.addDocument.isPending || !docTitle.trim() || !docUrl.trim()}
+                testID="dealroom-add-doc"
+              >
+                {actions.addDocument.isPending ? (
+                  <ActivityIndicator color={theme.colors.brandOn} />
+                ) : (
+                  <>
+                    <Plus size={16} color={theme.colors.brandOn} strokeWidth={2.5} />
+                    <Text style={styles.ctaText}>Add link</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+              <Text style={styles.hint}>
+                Links only — keep the file itself in Drive, Notion or Figma.
+              </Text>
+            </View>
+
+            {documents.length === 0 ? (
+              <View style={styles.empty}>
+                <Text style={styles.emptyText}>
+                  No documents yet. Start with your deck or a one-pager.
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.listGap}>
+                {documents.map((doc: any) => (
+                  <View key={doc.document_id} style={styles.rowCard}>
+                    <TouchableOpacity
+                      style={styles.rowMain}
+                      onPress={() => openDocument(doc.url)}
+                      activeOpacity={0.7}
+                      testID={`dealroom-doc-${doc.document_id}`}
+                    >
+                      <FileText size={16} color={theme.colors.brand} strokeWidth={1.75} />
+                      <View style={styles.flex}>
+                        <Text style={styles.rowTitle}>{doc.title}</Text>
+                        <Text style={styles.rowMeta} numberOfLines={1}>
+                          {nameOf(doc.added_by)} · {doc.url}
+                        </Text>
+                      </View>
+                      <ExternalLink size={14} color={theme.colors.textSecondary} strokeWidth={1.75} />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() =>
+                        actions.removeDocument.mutate(doc.document_id, {
+                          onError: fail('Could not remove the document'),
+                        })
+                      }
+                      style={styles.rowAction}
+                      testID={`dealroom-doc-remove-${doc.document_id}`}
+                    >
+                      <Trash2 size={14} color={theme.colors.errorOn} strokeWidth={1.75} />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
+
+        {tab === 'decisions' && (
+          <View style={styles.section}>
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Record a decision</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="What was decided?"
+                placeholderTextColor={theme.colors.textSecondary}
+                value={decisionTitle}
+                onChangeText={setDecisionTitle}
+                testID="dealroom-decision-title"
+              />
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                placeholder="Why, and what it commits you both to (optional)"
+                placeholderTextColor={theme.colors.textSecondary}
+                value={decisionDetail}
+                onChangeText={setDecisionDetail}
+                multiline
+                testID="dealroom-decision-detail"
+              />
+              <TouchableOpacity
+                style={[
+                  styles.ctaButton,
+                  (actions.addDecision.isPending || !decisionTitle.trim()) && styles.buttonDisabled,
+                ]}
+                onPress={addDecision}
+                disabled={actions.addDecision.isPending || !decisionTitle.trim()}
+                testID="dealroom-add-decision"
+              >
+                {actions.addDecision.isPending ? (
+                  <ActivityIndicator color={theme.colors.brandOn} />
+                ) : (
+                  <>
+                    <Gavel size={15} color={theme.colors.brandOn} strokeWidth={2} />
+                    <Text style={styles.ctaText}>Log decision</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+              <Text style={styles.hint}>
+                A decision stays pending until you both sign off on it.
+              </Text>
+            </View>
+
+            {decisions.length === 0 ? (
+              <View style={styles.empty}>
+                <Text style={styles.emptyText}>
+                  Nothing logged yet. Write down the first thing you agreed on.
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.listGap}>
+                {decisions
+                  .slice()
+                  .reverse()
+                  .map((decision: any) => {
+                    const agreed = decision.status === 'agreed';
+                    const iAgreed = !!myId && (decision.agreed_by || []).includes(myId);
+                    return (
+                      <View
+                        key={decision.decision_id}
+                        style={styles.card}
+                        testID={`dealroom-decision-${decision.decision_id}`}
+                      >
+                        <View style={styles.rowMain}>
+                          <View style={styles.flex}>
+                            <Text style={styles.rowTitle}>{decision.title}</Text>
+                            <Text style={styles.rowMeta}>
+                              Proposed by {nameOf(decision.created_by)}
+                            </Text>
+                          </View>
+                          <View style={[styles.statusPill, agreed && styles.statusPillOn]}>
+                            {agreed ? (
+                              <Check size={11} color={theme.colors.brand} strokeWidth={3} />
+                            ) : (
+                              <Clock3 size={11} color={theme.colors.textSecondary} strokeWidth={2} />
+                            )}
+                            <Text style={[styles.statusText, agreed && styles.statusTextOn]}>
+                              {agreed ? 'Agreed' : 'Pending'}
+                            </Text>
+                          </View>
+                        </View>
+                        {!!decision.detail && (
+                          <Text style={styles.cardBody}>{decision.detail}</Text>
+                        )}
+                        {!iAgreed && (
+                          <TouchableOpacity
+                            style={styles.secondaryBtn}
+                            onPress={() =>
+                              actions.agreeToDecision.mutate(decision.decision_id, {
+                                onError: fail('Could not sign off'),
+                              })
+                            }
+                            testID={`dealroom-agree-${decision.decision_id}`}
+                          >
+                            <Check size={14} color={theme.colors.brand} strokeWidth={2.5} />
+                            <Text style={styles.secondaryBtnText}>I agree</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    );
+                  })}
+              </View>
+            )}
+          </View>
+        )}
+
+        {tab === 'equity' && (
+          <View style={styles.section}>
+            {equityProposed && (
+              <View style={styles.card}>
+                <View style={styles.rowMain}>
+                  <Text style={styles.cardLabel}>CURRENT SPLIT</Text>
+                  <View
+                    style={[
+                      styles.statusPill,
+                      equity.status === 'agreed' && styles.statusPillOn,
+                    ]}
+                  >
+                    {equity.status === 'agreed' ? (
+                      <Check size={11} color={theme.colors.brand} strokeWidth={3} />
+                    ) : (
+                      <Clock3 size={11} color={theme.colors.textSecondary} strokeWidth={2} />
+                    )}
+                    <Text
+                      style={[
+                        styles.statusText,
+                        equity.status === 'agreed' && styles.statusTextOn,
+                      ]}
+                    >
+                      {equity.status === 'agreed' ? 'Agreed' : 'Awaiting agreement'}
+                    </Text>
+                  </View>
+                </View>
+
+                {Object.entries(equity.splits || {}).map(([userId, share]) => (
+                  <View key={userId} style={styles.splitRow}>
+                    <Text style={styles.splitName}>{nameOf(userId)}</Text>
+                    <View style={styles.splitTrack}>
+                      <View style={[styles.splitFill, { width: `${Number(share)}%` }]} />
+                    </View>
+                    <Text style={styles.splitValue}>{Number(share)}%</Text>
+                  </View>
+                ))}
+
+                <Text style={styles.rowMeta}>
+                  {equity.vesting_months
+                    ? `Vesting over ${equity.vesting_months} months with a ${equity.cliff_months ?? 0}-month cliff.`
+                    : 'No vesting — shares are held outright.'}
+                </Text>
+                <Text style={styles.rowMeta}>Proposed by {nameOf(equity.proposed_by)}</Text>
+
+                {!iAcceptedEquity && (
+                  <TouchableOpacity
+                    style={[styles.secondaryBtn, actions.acceptEquity.isPending && styles.buttonDisabled]}
+                    onPress={acceptEquity}
+                    disabled={actions.acceptEquity.isPending}
+                    testID="dealroom-accept-equity"
+                  >
+                    <Check size={14} color={theme.colors.brand} strokeWidth={2.5} />
+                    <Text style={styles.secondaryBtnText}>Accept this split</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>
+                {equityProposed ? 'Revise the split' : 'Propose a split'}
+              </Text>
+              <View style={styles.rangeRow}>
+                <View style={styles.flex}>
+                  <Text style={styles.fieldHint}>Your share (%)</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={equityDraft.mine}
+                    onChangeText={setMyShare}
+                    keyboardType="decimal-pad"
+                    maxLength={6}
+                    testID="dealroom-equity-mine"
+                  />
+                </View>
+                <View style={styles.flex}>
+                  <Text style={styles.fieldHint}>{nameOf(otherId)} (%)</Text>
+                  <View style={[styles.input, styles.readonlyInput]}>
+                    <Text style={styles.readonlyText}>
+                      {(() => {
+                        const mine = parseFloat(equityDraft.mine);
+                        if (Number.isNaN(mine)) return '—';
+                        return String(Math.round((100 - mine) * 100) / 100);
+                      })()}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              <View style={styles.rangeRow}>
+                <View style={styles.flex}>
+                  <Text style={styles.fieldHint}>Vesting (months)</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={equityDraft.vesting}
+                    onChangeText={setVesting}
+                    keyboardType="number-pad"
+                    maxLength={3}
+                    testID="dealroom-equity-vesting"
+                  />
+                </View>
+                <View style={styles.flex}>
+                  <Text style={styles.fieldHint}>Cliff (months)</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={equityDraft.cliff}
+                    onChangeText={setCliff}
+                    keyboardType="number-pad"
+                    maxLength={3}
+                    testID="dealroom-equity-cliff"
+                  />
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={[styles.ctaButton, actions.proposeEquity.isPending && styles.buttonDisabled]}
+                onPress={proposeEquity}
+                disabled={actions.proposeEquity.isPending}
+                testID="dealroom-propose-equity"
+              >
+                {actions.proposeEquity.isPending ? (
+                  <ActivityIndicator color={theme.colors.brandOn} />
+                ) : (
+                  <>
+                    <PieChart size={15} color={theme.colors.brandOn} strokeWidth={2} />
+                    <Text style={styles.ctaText}>
+                      {equityProposed ? 'Propose revision' : 'Propose split'}
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+              <Text style={styles.hint}>
+                Revising the split withdraws any agreement already given, so you both
+                confirm the numbers that end up on record.
+              </Text>
+            </View>
+          </View>
+        )}
+
         {tab === 'roadmap' && (
           <View style={styles.section}>
             {(!roadmap.phases || roadmap.phases.length === 0) ? (
@@ -339,13 +838,13 @@ export default function DealRoomScreen() {
                   Let AI generate a 90-day roadmap tailored to your team&apos;s skills and vision.
                 </Text>
                 <TouchableOpacity
-                  style={[styles.ctaButton, generatingRoadmap && styles.buttonDisabled]}
+                  style={[styles.ctaButton, actions.generateRoadmap.isPending && styles.buttonDisabled]}
                   onPress={generateRoadmap}
-                  disabled={generatingRoadmap}
+                  disabled={actions.generateRoadmap.isPending}
                   activeOpacity={0.85}
                   testID="dealroom-generate-roadmap"
                 >
-                  {generatingRoadmap ? (
+                  {actions.generateRoadmap.isPending ? (
                     <ActivityIndicator color={theme.colors.brandOn} />
                   ) : (
                     <>
@@ -397,11 +896,11 @@ export default function DealRoomScreen() {
                 )}
 
                 <TouchableOpacity
-                  style={[styles.regenerateBtn, generatingRoadmap && styles.buttonDisabled]}
+                  style={[styles.regenerateBtn, actions.generateRoadmap.isPending && styles.buttonDisabled]}
                   onPress={generateRoadmap}
-                  disabled={generatingRoadmap}
+                  disabled={actions.generateRoadmap.isPending}
                 >
-                  {generatingRoadmap ? (
+                  {actions.generateRoadmap.isPending ? (
                     <ActivityIndicator color={theme.colors.brand} size="small" />
                   ) : (
                     <>
@@ -438,20 +937,23 @@ const styles = StyleSheet.create({
   eyebrow: { ...theme.typography.micro, color: theme.colors.brand, marginBottom: 2 },
   title: { ...theme.typography.title2, color: theme.colors.text },
   tabs: {
+    flexGrow: 0,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.divider,
+  },
+  tabsContent: {
     flexDirection: 'row',
     paddingHorizontal: theme.spacing.lg,
     paddingVertical: theme.spacing.md,
     gap: theme.spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.divider,
   },
   tab: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
     paddingVertical: 10,
+    paddingHorizontal: theme.spacing.md,
     borderRadius: theme.radius.pill,
     backgroundColor: theme.colors.surfaceSecondary,
   },
@@ -686,4 +1188,97 @@ const styles = StyleSheet.create({
     color: theme.colors.brand,
     fontWeight: '500',
   },
+  errorBanner: {
+    marginHorizontal: theme.spacing.lg,
+    marginTop: theme.spacing.md,
+    padding: theme.spacing.md,
+    borderRadius: theme.radius.md,
+    backgroundColor: 'rgba(220,38,38,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(220,38,38,0.35)',
+  },
+  errorBannerText: { ...theme.typography.footnote, color: theme.colors.errorOn },
+  hint: { ...theme.typography.caption, color: theme.colors.textSecondary, lineHeight: 16 },
+  fieldHint: {
+    ...theme.typography.caption,
+    color: theme.colors.textSecondary,
+    marginBottom: 6,
+  },
+  listGap: { gap: theme.spacing.sm },
+  chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: theme.spacing.sm },
+  typeChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: theme.radius.pill,
+    backgroundColor: theme.colors.surfaceSecondary,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  typeChipOn: { backgroundColor: theme.colors.brand, borderColor: theme.colors.brand },
+  typeChipText: { ...theme.typography.caption, color: theme.colors.textSecondary },
+  typeChipTextOn: { color: theme.colors.brandOn, fontWeight: '600' },
+  rowCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.surfaceSecondary,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.radius.md,
+    paddingLeft: theme.spacing.md,
+  },
+  rowMain: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.md,
+    paddingVertical: theme.spacing.md,
+  },
+  rowAction: { padding: theme.spacing.md },
+  rowTitle: { ...theme.typography.callout, color: theme.colors.text, marginBottom: 2 },
+  rowMeta: { ...theme.typography.caption, color: theme.colors.textSecondary },
+  statusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: theme.radius.pill,
+    backgroundColor: theme.colors.surfaceTertiary,
+  },
+  statusPillOn: { backgroundColor: theme.colors.brandTertiary },
+  statusText: { ...theme.typography.caption, color: theme.colors.textSecondary },
+  statusTextOn: { color: theme.colors.brand, fontWeight: '600' },
+  secondaryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: theme.spacing.sm,
+    marginTop: theme.spacing.sm,
+    paddingVertical: 12,
+    borderRadius: theme.radius.pill,
+    borderWidth: 1,
+    borderColor: 'rgba(212,175,55,0.35)',
+    backgroundColor: theme.colors.brandTertiary,
+  },
+  secondaryBtnText: { ...theme.typography.subhead, color: theme.colors.brand, fontWeight: '600' },
+  splitRow: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm },
+  splitName: { ...theme.typography.subhead, color: theme.colors.text, width: 110 },
+  splitTrack: {
+    flex: 1,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: theme.colors.surfaceTertiary,
+    overflow: 'hidden',
+  },
+  splitFill: { height: 8, borderRadius: 4, backgroundColor: theme.colors.brand },
+  splitValue: {
+    ...theme.typography.subhead,
+    color: theme.colors.brand,
+    fontWeight: '700',
+    width: 56,
+    textAlign: 'right',
+  },
+  rangeRow: { flexDirection: 'row', gap: theme.spacing.md },
+  readonlyInput: { justifyContent: 'center', backgroundColor: theme.colors.surfaceTertiary },
+  readonlyText: { ...theme.typography.body, color: theme.colors.textSecondary },
 });

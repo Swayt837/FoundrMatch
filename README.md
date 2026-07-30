@@ -86,3 +86,21 @@ which is why it, and not the LLM, produces the number.
 Claude is used where an algorithm can't help: writing the "why you two" narrative
 for a pair (on demand, cached), the premium deep report with founder-risk detection,
 business ideas, deal-room roadmaps and the copilot.
+
+The `personality_score` dimension is fed by the founder assessment in
+`backend/personality.py` — ten statements on a 1–5 scale, scored into five traits.
+Four of them (risk appetite, pace, structure, directness) reward *alignment*; the
+fifth, builder-versus-seller orientation, rewards *difference*. Founders who haven't
+taken it fall back to seniority proximity, so the score always exists but taking the
+assessment measurably sharpens it.
+
+## Deal rooms
+
+A matched pair's workspace (Premium). Six tabs: overview, tasks, an AI-generated
+90-day roadmap, documents, decisions and equity.
+
+Documents are **links**, not uploads — there is no object storage here, and inlining
+files in a document that already holds base64 photos would run into MongoDB's 16 MB
+limit. Decisions and equity splits both require sign-off from both founders, and a
+split is rejected unless it totals 100% across exactly the two participants; revising
+one withdraws any agreement already given.

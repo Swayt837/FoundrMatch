@@ -162,6 +162,16 @@ class PhotosUpload(BaseModel):
         return photos
 
 
+class PersonalityAnswers(BaseModel):
+    """
+    Personality assessment submission: `{question_id: 1..5}`.
+
+    Values are validated against the live question set in `personality.py` rather
+    than here, so adding a question does not mean editing two files.
+    """
+    answers: Dict[str, Any] = Field(default_factory=dict)
+
+
 class SwipeAction(BaseModel):
     target_user_id: str
     direction: Literal["left", "right"]

@@ -233,6 +233,66 @@ class APIClient {
     });
   }
 
+  async addDealRoomDocument(
+    roomId: string,
+    document: { title: string; url: string; doc_type?: string; note?: string }
+  ) {
+    return this.request(`/deal-rooms/${roomId}/documents`, {
+      method: 'POST',
+      body: JSON.stringify(document),
+    });
+  }
+
+  async removeDealRoomDocument(roomId: string, documentId: string) {
+    return this.request(`/deal-rooms/${roomId}/documents/${documentId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async addDealRoomDecision(roomId: string, title: string, detail: string = '') {
+    return this.request(`/deal-rooms/${roomId}/decisions`, {
+      method: 'POST',
+      body: JSON.stringify({ title, detail }),
+    });
+  }
+
+  async agreeToDecision(roomId: string, decisionId: string) {
+    return this.request(`/deal-rooms/${roomId}/decisions/${decisionId}/agree`, {
+      method: 'POST',
+    });
+  }
+
+  async proposeEquity(
+    roomId: string,
+    proposal: {
+      splits: Record<string, number>;
+      vesting_months?: number;
+      cliff_months?: number;
+      notes?: string;
+    }
+  ) {
+    return this.request(`/deal-rooms/${roomId}/equity`, {
+      method: 'PUT',
+      body: JSON.stringify(proposal),
+    });
+  }
+
+  async acceptEquity(roomId: string) {
+    return this.request(`/deal-rooms/${roomId}/equity/accept`, { method: 'POST' });
+  }
+
+  // Personality assessment
+  async getPersonalityAssessment() {
+    return this.request('/assessment/personality');
+  }
+
+  async submitPersonalityAssessment(answers: Record<string, number>) {
+    return this.request('/assessment/personality', {
+      method: 'POST',
+      body: JSON.stringify({ answers }),
+    });
+  }
+
   // Projects
   async createProject(data: any) {
     return this.request('/projects/create', {

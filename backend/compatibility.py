@@ -21,6 +21,7 @@ import json
 import re
 from typing import Any, Dict, List, Set
 
+import personality
 from skills_taxonomy import concepts_for, domains_for, normalize
 
 # How much each dimension contributes. Every dimension is scored 0-100, so these
@@ -198,13 +199,29 @@ def _work_style_score(profile1: Dict[str, Any], profile2: Dict[str, Any]) -> flo
 
 def _personality_score(profile1: Dict[str, Any], profile2: Dict[str, Any]) -> float:
     """
-    Proxy for how well they will get on day to day.
+    How well they will get on day to day.
 
-    The `personality` profile field has never been collected, so this is derived
-    from seniority proximity (peers argue better than a senior/junior pair) and
-    shared working habits. Once the personality assessment ships, that data
-    replaces the seniority half.
+    When both founders have taken the personality assessment, their trait alignment
+    is the stronger half of this score — it measures agreement on risk, pace,
+    structure and directness, and *disagreement* on builder-versus-seller
+    orientation (see `personality.TRAITS`).
+
+    Without it, the fallback is seniority proximity: peers argue better than a
+    senior/junior pair. That is a proxy, not a measurement, which is why taking the
+    assessment visibly sharpens the score.
     """
+    habits = _similarity(
+        _normalized_set(profile1.get("work_style")),
+        _normalized_set(profile2.get("work_style")),
+    )
+
+    traits = personality.alignment(
+        personality.traits_of(profile1),
+        personality.traits_of(profile2),
+    )
+    if traits is not None:
+        return 100 * (0.65 * traits + 0.35 * habits)
+
     rank1 = EXPERIENCE_RANK.get(normalize(str(profile1.get("experience") or "")).replace(" ", "_"))
     rank2 = EXPERIENCE_RANK.get(normalize(str(profile2.get("experience") or "")).replace(" ", "_"))
 
@@ -213,11 +230,6 @@ def _personality_score(profile1: Dict[str, Any], profile2: Dict[str, Any]) -> fl
         seniority = 1 - abs(rank1 - rank2) / max_gap
     else:
         seniority = NEUTRAL
-
-    habits = _similarity(
-        _normalized_set(profile1.get("work_style")),
-        _normalized_set(profile2.get("work_style")),
-    )
 
     return 100 * (0.5 * seniority + 0.5 * habits)
 
