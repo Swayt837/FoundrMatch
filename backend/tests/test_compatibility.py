@@ -22,7 +22,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from compatibility import (  # noqa: E402
     DIMENSION_WEIGHTS,
     dimension_breakdown,
-    extract_json,
     score_compatibility,
 )
 
@@ -289,32 +288,3 @@ class TestDimensionBreakdown:
         for item in breakdown:
             assert item["label"]
             assert item["weight"] > 0
-
-
-class TestExtractJson:
-    def test_plain_object(self):
-        assert extract_json('{"a": 1}') == {"a": 1}
-
-    def test_fenced_block(self):
-        assert extract_json('```json\n{"a": 1}\n```') == {"a": 1}
-
-    def test_unterminated_fence(self):
-        # The old first-and-last-line slicing corrupted this case
-        assert extract_json('```json\n{"a": 1}') == {"a": 1}
-
-    def test_prose_around_payload(self):
-        assert extract_json('Sure! Here you go:\n{"a": 1}\nHope that helps.') == {"a": 1}
-
-    def test_bare_array(self):
-        assert extract_json('[{"title": "X"}]') == [{"title": "X"}]
-
-    def test_fenced_array(self):
-        assert extract_json('```\n[{"title": "X"}]\n```') == [{"title": "X"}]
-
-    def test_no_json_raises(self):
-        with pytest.raises(ValueError):
-            extract_json("I cannot help with that.")
-
-    def test_empty_input_raises(self):
-        with pytest.raises(ValueError):
-            extract_json("")

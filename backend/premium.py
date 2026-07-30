@@ -10,9 +10,13 @@ Two things were wrong with the previous version and both are fixed here:
    Signatures are now always verified and an unsigned event is rejected.
 
 2. **The "monthly" plan was a one-off charge granting permanent access.** It created
-   a one-time `CheckoutSessionRequest` and set `premium: True` with no expiry, so
-   9.99 once bought premium forever. Monthly is now a real Stripe subscription with
-   an expiry date, renewal handling and cancellation handling.
+   a one-time charge and set `premium: True` with no expiry, so 9.99 once bought
+   premium forever. Monthly is now a real Stripe subscription with an expiry date,
+   renewal handling and cancellation handling.
+
+Both flows now run on the official `stripe` package. The one-time plan used to go
+through `emergentintegrations`, a private SDK only installable inside the Emergent
+platform — which meant this module could not even be imported anywhere else.
 
 Premium state lives at the user document root: `premium`, `premium_plan`,
 `premium_since`, `premium_expires_at`, `stripe_subscription_id`. Always read it
@@ -26,10 +30,6 @@ import stripe
 from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
 
-from emergentintegrations.payments.stripe.checkout import (
-    StripeCheckout,
-    CheckoutSessionRequest,
-)
 from database import (
     users_collection,
     payment_transactions_collection,
@@ -40,10 +40,9 @@ from entitlements import FREE_DAILY_SWIPES, premium_active
 from quotas import swipes_used_today
 
 
-# The Emergent-provisioned key drives the existing one-time flow. A real Stripe
-# secret key is required for subscriptions (they need a Price object), so it is
-# read separately and the monthly plan stays unavailable until it is configured.
-STRIPE_API_KEY = os.getenv("STRIPE_API_KEY", "sk_test_emergent")
+# One key for everything. There used to be two: an Emergent-provisioned key for the
+# one-time flow and a real Stripe key for subscriptions. The private SDK is gone, so
+# both flows now go through the official `stripe` package and the same secret key.
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 STRIPE_PRICE_MONTHLY = os.getenv("STRIPE_PRICE_MONTHLY", "")
@@ -80,7 +79,11 @@ def _plans() -> Dict[str, Plan]:
     `available` is computed rather than hardcoded so the paywall can hide a plan
     that cannot actually be purchased instead of offering one that 503s.
     """
-    subscription_ready = bool(STRIPE_SECRET_KEY and STRIPE_PRICE_MONTHLY)
+    # Nothing can be sold without a secret key; a subscription additionally needs a
+    # Price object. Reporting that honestly is what lets the paywall hide a plan
+    # rather than offer one that 503s at checkout.
+    checkout_ready = bool(STRIPE_SECRET_KEY)
+    subscription_ready = checkout_ready and bool(STRIPE_PRICE_MONTHLY)
     return {
         "lifetime": Plan(
             id="lifetime",
@@ -88,6 +91,10 @@ def _plans() -> Dict[str, Plan]:
             amount=LIFETIME_AMOUNT,
             currency=PREMIUM_CURRENCY,
             interval=None,
+            available=checkout_ready,
+            unavailable_reason=(
+                None if checkout_ready else "Payments need STRIPE_SECRET_KEY."
+            ),
         ),
         "monthly": Plan(
             id="monthly",
@@ -181,18 +188,9 @@ class CheckoutResponse(BaseModel):
     session_id: str
 
 
-def _get_stripe_checkout(webhook_url: Optional[str] = None) -> StripeCheckout:
-    return StripeCheckout(
-        api_key=STRIPE_API_KEY,
-        webhook_secret=STRIPE_WEBHOOK_SECRET or None,
-        webhook_url=webhook_url,
-    )
-
-
 @router.post("/checkout", response_model=CheckoutResponse)
 async def create_checkout_session(
     body: CheckoutRequest,
-    request: Request,
     current_user: dict = Depends(get_current_user),
 ):
     """Create a Stripe Checkout Session for the given premium plan."""
@@ -220,9 +218,7 @@ async def create_checkout_session(
     if plan.interval:
         session_id, url = _create_subscription_session(success_url, cancel_url, metadata)
     else:
-        session_id, url = await _create_one_time_session(
-            request, plan, success_url, cancel_url, metadata
-        )
+        session_id, url = _create_one_time_session(plan, success_url, cancel_url, metadata)
 
     await payment_transactions_collection.insert_one({
         "session_id": session_id,
@@ -264,31 +260,41 @@ def _create_subscription_session(success_url: str, cancel_url: str, metadata: Di
     return session.id, session.url
 
 
-async def _create_one_time_session(
-    request: Request,
+def _create_one_time_session(
     plan: Plan,
     success_url: str,
     cancel_url: str,
     metadata: Dict[str, str],
 ):
-    """Lifetime plan: a single payment through the Emergent-provisioned integration."""
-    webhook_url = str(request.base_url).rstrip("/") + "/api/webhook/stripe"
-    checkout = _get_stripe_checkout(webhook_url=webhook_url)
+    """
+    Lifetime plan: a single payment, built inline rather than against a Price object.
 
-    session_request = CheckoutSessionRequest(
-        amount=plan.amount,
-        currency=plan.currency,
-        success_url=success_url,
-        cancel_url=cancel_url,
-        metadata=metadata,
-    )
-
+    `price_data` avoids having to keep a second Stripe Price in sync with
+    `PREMIUM_LIFETIME_AMOUNT`. The amount is still server-side — it comes from the
+    plan registry, never from the request — and `unit_amount` is in the currency's
+    minor unit, so the euros/dollars figure is converted to cents here.
+    """
     try:
-        session = await checkout.create_checkout_session(session_request)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Stripe error: {str(e)}")
+        session = stripe.checkout.Session.create(
+            mode="payment",
+            line_items=[{
+                "price_data": {
+                    "currency": plan.currency,
+                    "unit_amount": round(plan.amount * 100),
+                    "product_data": {"name": plan.name},
+                },
+                "quantity": 1,
+            }],
+            success_url=success_url,
+            cancel_url=cancel_url,
+            client_reference_id=metadata["user_id"],
+            metadata=metadata,
+            payment_intent_data={"metadata": metadata},
+        )
+    except stripe.StripeError as e:
+        raise HTTPException(status_code=502, detail=f"Stripe error: {e.user_message or str(e)}")
 
-    return session.session_id, session.url
+    return session.id, session.url
 
 
 # ============ STATUS ============

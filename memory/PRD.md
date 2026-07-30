@@ -81,11 +81,10 @@ An AI-powered mobile app that finds the ideal business partner using professiona
 - **API**: FastAPI (Python) with async/await
 - **Database**: MongoDB with Motor (async driver)
 - **Real-time**: Socket.io (python-socketio)
-- **Auth**: JWT (python-jose) + bcrypt + Emergent Google OAuth
-- **AI**: Claude Sonnet 4.6 via Emergent Integrations
+- **Auth**: JWT (python-jose) + bcrypt + Google OAuth
+- **AI**: Claude (Opus 5 by default) via the official Anthropic SDK
 
 ### Deployment
-- Preview: https://co-builder-1.preview.emergentagent.com
 - Backend port: 8001 (proxied via /api)
 - Frontend port: 3000
 

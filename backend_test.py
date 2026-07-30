@@ -2,12 +2,13 @@
 Comprehensive Backend API Tests for CoFound
 Tests all backend endpoints with real API calls
 """
+import os
 import requests
 import json
 from typing import Dict, Any, Optional
 
-# Backend URL from environment
-BACKEND_URL = "https://co-builder-1.preview.emergentagent.com/api"
+# The backend to exercise, e.g. http://localhost:8001 or your deployed URL.
+BACKEND_URL = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "http://localhost:8001").rstrip("/") + "/api"
 
 # Test credentials
 TEST_USER_1 = {

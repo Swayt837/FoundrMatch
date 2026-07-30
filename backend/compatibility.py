@@ -17,8 +17,6 @@ So the number is computed here and the LLM writes *about* it — see
   outcomes, which is impossible when the model is the judge.
 - **Free and instant** — thousands of candidates can be ranked per request.
 """
-import json
-import re
 from typing import Any, Dict, List, Set
 
 import personality
@@ -64,36 +62,6 @@ NEUTRAL = 0.5
 # individual skills — a developer and a designer is the shape we're looking for.
 _DOMAIN_WEIGHT = 0.6
 _CONCEPT_WEIGHT = 0.4
-
-_FENCE_RE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.IGNORECASE)
-
-
-# ===== JSON extraction (used by ai_service for LLM responses) =====
-
-def extract_json(text: str) -> Any:
-    """
-    Pull a JSON value out of a model response.
-
-    Handles bare JSON, fenced blocks, and prose wrapped around the payload. The
-    original implementation sliced off the first and last line, which silently
-    corrupted any response whose fence was missing or unbalanced.
-    """
-    cleaned = _FENCE_RE.sub("", (text or "").strip())
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        pass
-
-    for opener, closer in (("{", "}"), ("[", "]")):
-        start = cleaned.find(opener)
-        end = cleaned.rfind(closer)
-        if start != -1 and end > start:
-            try:
-                return json.loads(cleaned[start:end + 1])
-            except json.JSONDecodeError:
-                continue
-
-    raise ValueError("No JSON object found in model response")
 
 
 # ===== Set similarity =====

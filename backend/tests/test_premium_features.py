@@ -11,7 +11,9 @@ import time
 import pytest
 import requests
 
-BASE_URL = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "https://co-builder-1.preview.emergentagent.com").rstrip("/")
+# Points at whatever backend you want to exercise. conftest.py skips this whole
+# suite when the variable is unset, so there is no default to go stale.
+BASE_URL = os.environ["EXPO_PUBLIC_BACKEND_URL"].rstrip("/")
 
 TEST_EMAIL = "speed_test@t.com"
 TEST_PASSWORD = "test123"

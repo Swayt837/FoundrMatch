@@ -11,10 +11,8 @@ import uuid
 import pytest
 import requests
 
-BASE_URL = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "").rstrip("/")
-if not BASE_URL:
-    # fall back to frontend env value (should be present via kubernetes ingress)
-    BASE_URL = "https://co-builder-1.preview.emergentagent.com"
+# conftest.py skips this suite unless the variable is set, so there is no default.
+BASE_URL = os.environ["EXPO_PUBLIC_BACKEND_URL"].rstrip("/")
 
 
 @pytest.fixture(scope="module")

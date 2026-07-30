@@ -4,14 +4,13 @@ AI routes: compatibility narrative, premium deep report, business ideas, copilot
 The compatibility *score* is computed locally (see `compatibility`); the model is
 used only for the things an algorithm cannot do, and only on demand.
 """
-import os
 from typing import Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from access import require_match_participant
-from ai_service import StreamDone, TextDelta, ai_service
+from ai_service import ai_service
 from auth import get_current_user
 from compatibility import dimension_breakdown, score_compatibility
 from database import get_utc_now, users_collection
@@ -163,6 +162,7 @@ class AICopilotRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
     history: List[Dict[str, str]] = []
 
+
 @router.post(
     "/ai/copilot/chat",
     dependencies=[Depends(ai_rate_limit), Depends(require_premium)],
@@ -172,47 +172,30 @@ async def copilot_chat(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    General AI copilot chat - non-streaming for simplicity.
-    Uses user's profile as context.
+    Ask the copilot a question, with the caller's profile as context.
+
+    The prompt and the model configuration live in `ai_service` like every other AI
+    feature — this route used to build its own client with its own hardcoded model,
+    which meant changing the model in one place silently missed this endpoint.
     """
-    from ai_service import LlmChat, UserMessage
-    
-    profile = current_user.get("profile", {})
-    profession = profile.get("profession", "founder")
-    skills = ", ".join(profile.get("skills", [])[:5]) or "not specified"
-    objectives = ", ".join(profile.get("objectives", [])[:3]) or "not specified"
-    experience = profile.get("experience", "not specified")
-    
-    system_message = f"""You are CoFound AI Copilot, an expert startup advisor helping entrepreneurs build their business.
+    profile = current_user.get("profile") or {}
 
-User context:
-- Profession: {profession}
-- Skills: {skills}
-- Experience: {experience}
-- Objectives: {objectives}
+    response = await ai_service.business_copilot(
+        message=payload.message,
+        context={
+            "profession": profile.get("profession", "founder"),
+            "skills": (profile.get("skills") or [])[:5],
+            "experience": profile.get("experience", "not specified"),
+            "objectives": (profile.get("objectives") or [])[:3],
+        },
+    )
 
-Provide concise, actionable advice. Use markdown when helpful. Ask clarifying questions when needed. 
-Keep responses focused and under 200 words unless the user asks for depth."""
-    
-    session_id = f"copilot-{current_user['user_id']}"
-    
-    try:
-        chat = LlmChat(
-            api_key=os.getenv("EMERGENT_LLM_KEY"),
-            session_id=session_id,
-            system_message=system_message
-        ).with_model("anthropic", "claude-sonnet-4-6")
-        
-        user_msg = UserMessage(text=payload.message)
-        
-        response_text = ""
-        async for event in chat.stream_message(user_msg):
-            if isinstance(event, TextDelta):
-                response_text += event.content
-            elif isinstance(event, StreamDone):
-                break
-        
-        return {"response": response_text}
-    except Exception as e:
-        print(f"AI Copilot error: {e}")
-        raise HTTPException(status_code=500, detail=f"AI service error: {str(e)}")
+    if response is None:
+        # Either no API key is configured or the call failed. 503 says "try later",
+        # which is true, where the previous 500 blamed the request.
+        raise HTTPException(
+            status_code=503,
+            detail="The AI copilot is temporarily unavailable. Please try again shortly.",
+        )
+
+    return {"response": response}

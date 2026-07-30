@@ -47,12 +47,16 @@ jobs:
       - name: Syntax check every module
         run: python -m compileall -q .
 
-      # requirements.txt pins a privately hosted litellm wheel and the
-      # emergentintegrations SDK, which CI cannot fetch. The unit suites are
-      # written to need none of that, so only their dependencies are installed
-      # here.
-      - name: Install test dependencies
-        run: pip install pytest pytest-asyncio pydantic email-validator fastapi motor python-dotenv
+      # Every dependency is public now. requirements.txt used to pin a privately
+      # hosted litellm wheel and the emergentintegrations SDK, so CI could only
+      # install a hand-listed subset and could never import the app itself.
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # Proves the app actually starts — a broken import or a bad router mount is
+      # invisible to a unit suite that only imports leaf modules.
+      - name: Import the app
+        run: python -c "import server; print(len(server.app.openapi()['paths']), 'routes')"
 
       # The whole directory: tests/conftest.py skips the suites that need a
       # deployed backend (they run only when EXPO_PUBLIC_BACKEND_URL is set), so
