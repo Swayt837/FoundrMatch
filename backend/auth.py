@@ -1,21 +1,28 @@
 """
-Authentication utilities for CoFound
-Supports both JWT-based email/password auth and Google OAuth
+Authentication utilities for CoFound.
+
+Email/password and Google sign-in both end at the same place: a JWT this backend
+issued. Google used to end somewhere else — an opaque session token minted by
+Emergent's hosted OAuth service, which this backend accepted without verifying
+anything itself. Google now hands us an identity token we verify against Google's
+own signing keys (`verify_google_id_token`), and we mint our own JWT from it.
 """
+import asyncio
 import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
-import httpx
+
 from passlib.context import CryptContext
 from jose import jwt
 from fastapi import Header, HTTPException
 from dotenv import load_dotenv
+from google.auth.exceptions import GoogleAuthError
+from google.auth.transport import requests as google_requests
+from google.oauth2 import id_token as google_id_token
 from database import (
     users_collection,
-    user_sessions_collection,
     generate_user_id,
     get_utc_now,
-    make_timezone_aware
 )
 
 load_dotenv()
@@ -86,8 +93,12 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 
 async def get_current_user(authorization: Optional[str] = Header(None)) -> Dict[str, Any]:
     """
-    Get current user from Bearer token
-    Works with both JWT tokens and Emergent session tokens
+    Resolve the user behind a Bearer token.
+
+    One credential type: a JWT this backend signed. There used to be a second — an
+    opaque Google session token looked up in `user_sessions` — and it was checked
+    *first*, so every authenticated request in the app paid a database round trip
+    before falling through to the JWT it almost always was.
     """
     if not authorization:
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -98,31 +109,7 @@ async def get_current_user(authorization: Optional[str] = Header(None)) -> Dict[
         raise HTTPException(status_code=401, detail="Invalid authorization header")
     
     token = parts[1]
-    
-    # Try as session token first (from Google OAuth)
-    session = await user_sessions_collection.find_one(
-        {"session_token": token},
-        {"_id": 0}
-    )
-    
-    if session:
-        # Check if session is expired
-        expires_at = session.get("expires_at")
-        if expires_at:
-            expires_at = make_timezone_aware(expires_at)
-            if expires_at < get_utc_now():
-                raise HTTPException(status_code=401, detail="Session expired")
-        
-        # Get user
-        user = await users_collection.find_one(
-            {"user_id": session["user_id"]},
-            {"_id": 0, "password_hash": 0}
-        )
-        if not user:
-            raise HTTPException(status_code=401, detail="User not found")
-        return user
-    
-    # Try as JWT token (from email/password auth)
+
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id: str = payload.get("user_id")
@@ -142,20 +129,75 @@ async def get_current_user(authorization: Optional[str] = Header(None)) -> Dict[
     return user
 
 
-async def process_google_session(session_id: str) -> Dict[str, Any]:
+# The OAuth client IDs this backend will accept a token for — one per platform
+# (iOS, Android, Web), comma-separated. Google issues a token whose `aud` is the
+# client that requested it, so all three have to be listed.
+GOOGLE_CLIENT_IDS = [
+    client_id.strip()
+    for client_id in os.getenv("GOOGLE_CLIENT_IDS", "").split(",")
+    if client_id.strip()
+]
+
+# The only issuers Google signs identity tokens with.
+_GOOGLE_ISSUERS = ("accounts.google.com", "https://accounts.google.com")
+
+
+async def verify_google_id_token(token: str) -> Dict[str, Any]:
     """
-    Process Google OAuth session ID and return session data
+    Verify a Google ID token and return its claims.
+
+    This replaces a call to Emergent's hosted OAuth service, which handed back
+    session data this backend trusted without checking anything itself.
+
+    Three checks, each of which is load-bearing:
+
+    - **Signature and expiry** (`verify_oauth2_token`). Without it the token is just
+      a base64 string anyone can write.
+    - **Audience.** A validly-signed Google token issued to *some other application*
+      is still a real Google token. Accepting it would let any developer with a Google
+      OAuth client sign in as any of our users. `verify_oauth2_token` takes a single
+      audience, and we have one client ID per platform, so the check is done here
+      against the allowlist instead.
+    - **`email_verified`.** `create_or_get_user_from_google` matches an existing
+      account by email, so an unverified address is an account-takeover route: claim
+      someone's email on a throwaway Google account, sign in, inherit their profile.
+
+    Verification fetches and caches Google's signing certificates over HTTP, and the
+    library is synchronous — running it inline would block the event loop for every
+    other request in flight, so it goes to a worker thread.
     """
-    async with httpx.AsyncClient() as client:
-        response = await client.get(
-            "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data",
-            headers={"X-Session-ID": session_id}
+    if not GOOGLE_CLIENT_IDS:
+        raise HTTPException(
+            status_code=503,
+            detail="Google sign-in is not configured on this server.",
         )
-        
-        if response.status_code != 200:
-            raise HTTPException(status_code=401, detail="Invalid session")
-        
-        return response.json()
+
+    try:
+        claims = await asyncio.to_thread(
+            google_id_token.verify_oauth2_token,
+            token,
+            google_requests.Request(),
+            # Audience deliberately unset — checked against the allowlist below.
+            None,
+        )
+    except (ValueError, GoogleAuthError):
+        # Bad signature, expired, or malformed. The reason is not the caller's
+        # business and saying which one helps an attacker iterate.
+        raise HTTPException(status_code=401, detail="Invalid Google token")
+
+    if claims.get("aud") not in GOOGLE_CLIENT_IDS:
+        raise HTTPException(status_code=401, detail="Token was not issued for this app")
+
+    if claims.get("iss") not in _GOOGLE_ISSUERS:
+        raise HTTPException(status_code=401, detail="Invalid Google token")
+
+    if not claims.get("email") or not claims.get("email_verified"):
+        raise HTTPException(
+            status_code=401,
+            detail="Your Google account must have a verified email address.",
+        )
+
+    return claims
 
 
 async def create_or_get_user_from_google(
@@ -237,20 +279,3 @@ async def create_or_get_user_from_google(
     return new_user
 
 
-async def store_session(session_token: str, user_id: str):
-    """Store session token in database"""
-    expires_at = get_utc_now() + timedelta(days=7)
-    
-    session = {
-        "session_token": session_token,
-        "user_id": user_id,
-        "expires_at": expires_at,
-        "created_at": get_utc_now()
-    }
-    
-    # Upsert session
-    await user_sessions_collection.update_one(
-        {"session_token": session_token},
-        {"$set": session},
-        upsert=True
-    )

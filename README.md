@@ -19,14 +19,22 @@ frontend/    Expo app (expo-router) for iOS, Android and web
 ```sh
 cd backend
 pip install -r requirements.txt
-cp .env.example .env          # then fill in SECRET_KEY and, optionally, EMERGENT_LLM_KEY
+cp .env.example .env          # then fill in SECRET_KEY and, optionally, ANTHROPIC_API_KEY
 uvicorn server:socket_app --host 0.0.0.0 --port 8001 --reload
 ```
 
+Serve `server:socket_app`, not `server:app` — the former is the Socket.io wrapper
+around the latter, and picking the wrong one silently disables all real-time
+features (chat, match notifications, call signalling) while every HTTP route keeps
+working.
+
 Needs a MongoDB on `MONGO_URL` (defaults to `mongodb://localhost:27017`).
-Without `EMERGENT_LLM_KEY` everything still works — compatibility scoring is local
-and deterministic; only the AI narrative, deep report, business ideas and copilot
-are unavailable.
+
+Every dependency is public. Nothing here requires a hosted platform: `ANTHROPIC_API_KEY`
+talks to the Claude API directly, `STRIPE_SECRET_KEY` to Stripe, `GOOGLE_CLIENT_IDS` to
+Google. All three are optional for local work — without them, compatibility scoring
+still runs (it is local and deterministic), and what degrades is stated at each key in
+`.env.example`.
 
 Seed some founders to swipe on:
 
@@ -105,6 +113,20 @@ cd frontend && yarn typecheck && yarn lint
 
 The suites under `backend/tests` that talk to a deployed backend are skipped unless
 `EXPO_PUBLIC_BACKEND_URL` is set. CI runs the same three commands.
+
+## Sign-in
+
+Email/password and Google both end with a JWT this backend signed — one credential
+type, one code path in `get_current_user`.
+
+Google is optional. Without `GOOGLE_CLIENT_IDS` (server) and the
+`EXPO_PUBLIC_GOOGLE_*_CLIENT_ID` values (app) the button is hidden rather than shown
+broken, and email/password is unaffected. When it is configured, the app runs the
+PKCE flow against Google directly and posts the resulting ID token; the server checks
+its **signature, audience and `email_verified` claim** before touching an account.
+The audience check is not optional — a validly-signed Google token issued to someone
+else's app is still a real Google token, and accounts are matched by email, so an
+unverified address would be an account-takeover route.
 
 ## How matching works
 

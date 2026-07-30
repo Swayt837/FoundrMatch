@@ -130,10 +130,16 @@ class APIClient {
     });
   }
 
-  async googleCallback(sessionId: string) {
+  /**
+   * Exchange a Google ID token for our own access token.
+   *
+   * The server verifies the token's signature, audience and verified-email claim
+   * against Google before trusting any of it — see `verify_google_id_token`.
+   */
+  async googleCallback(idToken: string) {
     return this.request('/auth/google/callback', {
       method: 'POST',
-      body: JSON.stringify({ session_id: sessionId }),
+      body: JSON.stringify({ id_token: idToken }),
     });
   }
 

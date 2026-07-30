@@ -16,7 +16,7 @@ An AI-powered mobile app that finds the ideal business partner using professiona
 
 ### 1. Dual Authentication
 - Email/Password with JWT
-- Google Social Login (Emergent-managed)
+- Google Social Login (OAuth + PKCE, ID token verified server-side)
 - Secure session management
 
 ### 2. Comprehensive Onboarding

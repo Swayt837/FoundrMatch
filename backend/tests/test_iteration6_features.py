@@ -6,7 +6,6 @@ Iteration 6 tests:
 - Regression: /api/auth/login, /api/discovery/cards, /api/matches
 """
 import os
-import time
 import uuid
 import pytest
 import requests

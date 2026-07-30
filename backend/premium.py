@@ -330,7 +330,7 @@ async def get_checkout_status(
     if txn.get("interval"):
         status = _subscription_session_status(session_id)
     else:
-        status = await _one_time_session_status(session_id)
+        status = _one_time_session_status(session_id)
 
     await payment_transactions_collection.update_one(
         {"session_id": session_id},
@@ -393,19 +393,19 @@ def _subscription_session_status(session_id: str) -> Dict[str, Any]:
     }
 
 
-async def _one_time_session_status(session_id: str) -> Dict[str, Any]:
-    checkout = _get_stripe_checkout()
+def _one_time_session_status(session_id: str) -> Dict[str, Any]:
+    """Read a one-time checkout session. No expiry — lifetime is lifetime."""
     try:
-        status = await checkout.get_checkout_status(session_id)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Stripe error: {str(e)}")
+        session = stripe.checkout.Session.retrieve(session_id)
+    except stripe.StripeError as e:
+        raise HTTPException(status_code=502, detail=f"Stripe error: {e.user_message or str(e)}")
 
     return {
-        "status": status.status,
-        "payment_status": status.payment_status,
-        "amount_total": status.amount_total,
-        "currency": status.currency,
-        "expires_at": None,  # lifetime
+        "status": session.get("status") or "open",
+        "payment_status": session.get("payment_status") or "unpaid",
+        "amount_total": session.get("amount_total") or 0,
+        "currency": session.get("currency") or PREMIUM_CURRENCY,
+        "expires_at": None,
         "subscription_id": None,
     }
 

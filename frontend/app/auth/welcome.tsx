@@ -2,13 +2,13 @@
  * Welcome Screen - Cinematic entry point
  */
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ImageBackground, StatusBar, Platform } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { View, Text, StyleSheet, TouchableOpacity, ImageBackground, StatusBar, Platform, Alert } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { Mail, ArrowRight } from 'lucide-react-native';
-import { useAuth } from '@/src/contexts/AuthContext';
+import { googleSignInConfigured, useAuth } from '@/src/contexts/AuthContext';
 import { theme } from '@/src/theme';
 
 export default function WelcomeScreen() {
@@ -22,8 +22,11 @@ export default function WelcomeScreen() {
     }
     try {
       await signInWithGoogle();
-    } catch (error) {
-      console.error('Google sign in failed:', error);
+    } catch (error: any) {
+      // A sign-in button that fails silently reads as a broken app. Say something.
+      const message = error?.message || 'Google sign-in failed. Please try again.';
+      if (Platform.OS === 'web') window.alert(message);
+      else Alert.alert('Sign-in failed', message);
     }
   };
 
@@ -75,24 +78,41 @@ export default function WelcomeScreen() {
           </View>
 
           <View style={styles.actionsSection}>
-            <TouchableOpacity
-              style={styles.primaryButton}
-              onPress={handleGoogleSignIn}
-              activeOpacity={0.85}
-              testID="welcome-google-button"
-            >
-              <Text style={styles.primaryButtonText}>Continue with Google</Text>
-              <ArrowRight size={18} color={theme.colors.brandOn} strokeWidth={2.5} />
-            </TouchableOpacity>
+            {/* Hidden entirely when no Google client ID is configured. A visible
+                button that cannot work is worse than one fewer option — and App
+                Store review exercises every sign-in path on the screen. */}
+            {googleSignInConfigured && (
+              <TouchableOpacity
+                style={styles.primaryButton}
+                onPress={handleGoogleSignIn}
+                activeOpacity={0.85}
+                testID="welcome-google-button"
+              >
+                <Text style={styles.primaryButtonText}>Continue with Google</Text>
+                <ArrowRight size={18} color={theme.colors.brandOn} strokeWidth={2.5} />
+              </TouchableOpacity>
+            )}
 
             <TouchableOpacity
-              style={styles.secondaryButton}
+              style={googleSignInConfigured ? styles.secondaryButton : styles.primaryButton}
               onPress={handleEmailSignUp}
               activeOpacity={0.7}
               testID="welcome-email-button"
             >
-              <Mail size={18} color={theme.colors.text} strokeWidth={1.75} />
-              <Text style={styles.secondaryButtonText}>Sign up with Email</Text>
+              <Mail
+                size={18}
+                color={googleSignInConfigured ? theme.colors.text : theme.colors.brandOn}
+                strokeWidth={1.75}
+              />
+              <Text
+                style={
+                  googleSignInConfigured
+                    ? styles.secondaryButtonText
+                    : styles.primaryButtonText
+                }
+              >
+                Sign up with Email
+              </Text>
             </TouchableOpacity>
 
             <TouchableOpacity

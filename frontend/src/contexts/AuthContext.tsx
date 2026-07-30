@@ -1,16 +1,39 @@
 /**
- * Authentication Context for CoFound
- * Supports both email/password and Google OAuth
+ * Authentication Context for CoFound.
+ *
+ * Email/password and Google both end with the same thing in secure storage: an
+ * access token this app's backend signed.
+ *
+ * Google sign-in used to be a redirect to Emergent's hosted OAuth service, which
+ * handed back an opaque session id — so it stopped working the moment the backend
+ * left that platform, and nothing in our stack ever verified the identity. It now
+ * runs the standard flow against Google directly with PKCE, and the ID token is
+ * verified server-side before an account is touched.
  */
 import React, { createContext, useState, useContext, useEffect } from 'react';
+import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
-import * as Linking from 'expo-linking';
-import { Platform } from 'react-native';
 import { storage } from '@/src/utils/storage';
 import { api, setUnauthorizedHandler } from '@/src/api/client';
 import { disconnectSocket } from '@/src/lib/socket';
 
+// Closes the popup/tab the auth flow opened once it redirects back.
 WebBrowser.maybeCompleteAuthSession();
+
+/**
+ * OAuth client IDs, one per platform — Google issues a token stamped with the
+ * client that asked for it, and the backend only accepts ones it recognises.
+ *
+ * Public values, safe to ship: the PKCE flow has no client secret, which is the
+ * whole reason it exists for apps that cannot keep one.
+ */
+const GOOGLE_CLIENT_IDS = {
+  iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
+  androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID,
+  webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+};
+
+export const googleSignInConfigured = Object.values(GOOGLE_CLIENT_IDS).some(Boolean);
 
 export interface UserVerification {
   email_verified: boolean;
@@ -64,30 +87,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Google's response arrives asynchronously after the browser closes, so the flow
+  // is driven by a hook and completed in the effect below rather than awaited inline.
+  const [googleRequest, googleResponse, promptGoogle] = Google.useIdTokenAuthRequest(
+    GOOGLE_CLIENT_IDS
+  );
+
   useEffect(() => {
     // Setup 401 handler to force logout + redirect
     setUnauthorizedHandler(() => {
       disconnectSocket();
       setUser(null);
     });
-    
+
     // Check for existing session on mount
     checkExistingSession();
-    
-    // Handle deep links (Google OAuth callback on mobile)
-    const subscription = Linking.addEventListener('url', handleDeepLink);
-    
-    // Check initial URL (for cold starts)
-    Linking.getInitialURL().then((url) => {
-      if (url) {
-        handleDeepLink({ url });
-      }
-    });
-    
-    return () => {
-      subscription.remove();
-    };
   }, []);
+
+  useEffect(() => {
+    if (googleResponse?.type !== 'success') return;
+
+    // `id_token` is the identity assertion the backend verifies. The access token
+    // Google also returns is for calling Google's own APIs, which we do not do.
+    const idToken = googleResponse.params?.id_token;
+    if (!idToken) {
+      console.error('Google sign-in returned no id_token');
+      return;
+    }
+
+    (async () => {
+      try {
+        const session = await api.googleCallback(idToken);
+        await storage.secureSet('auth_token', session.access_token);
+        setUser(await api.getMe());
+      } catch (error) {
+        console.error('Google sign in failed:', error);
+      }
+    })();
+  }, [googleResponse]);
 
   const checkExistingSession = async () => {
     try {
@@ -96,33 +133,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const userData = await api.getMe();
         setUser(userData);
       }
-    } catch (error) {
+    } catch {
+      // A stored token that no longer resolves to a user is worse than none: every
+      // later request retries with it and gets a 401.
       console.log('No existing session');
       await storage.secureRemove('auth_token');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleDeepLink = async ({ url }: { url: string }) => {
-    // Parse session_id from URL (supports both hash and query params)
-    let sessionId = null;
-    
-    if (url.includes('#session_id=')) {
-      sessionId = url.split('#session_id=')[1].split('&')[0];
-    } else if (url.includes('?session_id=')) {
-      sessionId = url.split('?session_id=')[1].split('&')[0];
-    }
-
-    if (sessionId) {
-      try {
-        const response = await api.googleCallback(sessionId);
-        await storage.secureSet('auth_token', response.session_token);
-        const userData = await api.getMe();
-        setUser(userData);
-      } catch (error) {
-        console.error('Google auth error:', error);
-      }
     }
   };
 
@@ -140,27 +157,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(userData);
   };
 
+  /**
+   * Open Google's consent screen. The session is established by the effect above
+   * when the response comes back — this only starts the flow.
+   */
   const signInWithGoogle = async () => {
-    try {
-      const redirectUrl = Platform.OS === 'web' 
-        ? `${window.location.origin}/`
-        : Linking.createURL('');
-      
-      const authUrl = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
-
-      if (Platform.OS === 'web') {
-        window.location.href = authUrl;
-      } else {
-        const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUrl);
-        
-        if (result.type === 'success' && result.url) {
-          await handleDeepLink({ url: result.url });
-        }
-      }
-    } catch (error) {
-      console.error('Google sign in error:', error);
-      throw error;
+    if (!googleSignInConfigured) {
+      throw new Error(
+        'Google sign-in is not configured. Set EXPO_PUBLIC_GOOGLE_*_CLIENT_ID.'
+      );
     }
+    // `googleRequest` is null until the PKCE challenge has been generated; prompting
+    // before then silently does nothing.
+    if (!googleRequest) {
+      throw new Error('Google sign-in is still initialising. Try again in a moment.');
+    }
+
+    await promptGoogle();
   };
 
   const signOut = async () => {
