@@ -5,7 +5,6 @@ Uses Emergent-provisioned Stripe test key (sk_test_emergent) with proxy base.
 import os
 import stripe
 from typing import Optional
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
@@ -20,6 +19,7 @@ from database import (
     get_utc_now,
 )
 from auth import get_current_user
+from quotas import FREE_DAILY_SWIPES, swipes_used_today
 
 
 STRIPE_API_KEY = os.getenv("STRIPE_API_KEY", "sk_test_emergent")
@@ -185,13 +185,12 @@ async def get_checkout_status(
 @router.get("/me")
 async def get_my_premium(current_user: dict = Depends(get_current_user)):
     """Return current user's premium status + swipe usage."""
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    swipes_today = 0
-    if current_user.get("daily_swipes_date") == today:
-        swipes_today = current_user.get("daily_swipes_used", 0)
+    # Quota constants live in quotas.py so /api/swipe and this endpoint cannot
+    # disagree about what the free allowance is.
+    swipes_today = swipes_used_today(current_user)
 
     is_premium = bool(current_user.get("premium", False))
-    daily_limit = 10  # Free tier limit
+    daily_limit = FREE_DAILY_SWIPES
 
     return {
         "premium": is_premium,

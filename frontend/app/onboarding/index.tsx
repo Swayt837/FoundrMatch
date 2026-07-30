@@ -295,7 +295,7 @@ export default function OnboardingScreen() {
               <Text style={styles.eyebrow}>STEP 1</Text>
               <Text style={styles.stepTitle}>Where are{'\n'}you based?</Text>
               <Text style={styles.stepSubtitle}>
-                We'll match you with cofounders in your timezone and beyond.
+                We&apos;ll match you with cofounders in your timezone and beyond.
               </Text>
 
               <View style={styles.fieldsGroup}>

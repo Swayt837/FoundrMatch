@@ -117,7 +117,7 @@ export default function PremiumScreen() {
           <View style={styles.iconHero}>
             <Sparkles size={40} color={theme.colors.brand} strokeWidth={1.75} fill={theme.colors.brand} />
           </View>
-          <Text style={styles.alreadyTitle}>You're Premium</Text>
+          <Text style={styles.alreadyTitle}>You&apos;re Premium</Text>
           <Text style={styles.alreadyDesc}>
             You already have unlimited access. Enjoy building.
           </Text>

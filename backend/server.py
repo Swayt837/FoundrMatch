@@ -2,36 +2,46 @@
 CoFound Backend API
 A comprehensive platform for matching business cofounders
 """
-from fastapi import FastAPI, HTTPException, Depends, Header
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException, Depends, Header, Body
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+import re
 import socketio
 import os
 from typing import Optional, List, Dict, Any
-from datetime import datetime, timedelta
 from dotenv import load_dotenv
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # Import models and utilities
 from models import (
     UserRegistration, UserLogin, OnboardingData, SwipeAction,
-    MessageCreate, ProjectCreate, DealRoomCreate, DealRoomTask,
-    AIBusinessRequest, CompatibilityScore
+    MessageCreate, ProjectCreate, DealRoomCreate,
+    PhotosUpload, ProjectApplication
 )
 from database import (
     users_collection, swipes_collection, matches_collection,
     messages_collection, deal_rooms_collection, projects_collection,
-    user_sessions_collection, create_indexes, generate_user_id,
-    get_utc_now
+    user_sessions_collection, create_indexes,
+    run_migrations, generate_user_id, get_utc_now
 )
 from auth import (
     get_password_hash, verify_password, create_access_token,
-    get_current_user, process_google_session, 
-    create_or_get_user_from_google, store_session
+    get_current_user, process_google_session,
+    create_or_get_user_from_google, store_session,
+    validate_password_strength
 )
 from ai_service import ai_service, TextDelta, StreamDone
 from premium import router as premium_router, webhook_router as premium_webhook_router
+from account import router as account_router
+from moderation import blocked_user_ids, assert_not_blocked
+from quotas import claim_daily_swipe
+import gamification
+from serializers import public_user, private_user, PUBLIC_USER_PROJECTION
+from rate_limit import RateLimiter
+
+# Auth endpoints are brute-force targets; the AI routes cost real tokens per call.
+auth_rate_limit = RateLimiter("auth", limit=10, window=60)
+ai_rate_limit = RateLimiter("ai", limit=20, window=60)
 
 load_dotenv()
 
@@ -42,6 +52,7 @@ async def lifespan(app: FastAPI):
     # Startup
     await create_indexes()
     print("✅ Database indexes created")
+    await run_migrations()
     yield
     # Shutdown
     print("Shutting down...")
@@ -49,11 +60,19 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="CoFound API", lifespan=lifespan)
 
+# Allowed origins come from the environment. `*` stays the default for local
+# development, but it is incompatible with credentialed requests — browsers
+# reject that combination — so credentials are only enabled for an explicit list.
+ALLOWED_ORIGINS = [
+    o.strip() for o in os.getenv("ALLOWED_ORIGINS", "*").split(",") if o.strip()
+]
+_allow_any_origin = "*" in ALLOWED_ORIGINS
+
 # Socket.io setup for real-time chat
 sio = socketio.AsyncServer(
     async_mode='asgi',
-    cors_allowed_origins='*',
-    logger=True,
+    cors_allowed_origins='*' if _allow_any_origin else ALLOWED_ORIGINS,
+    logger=False,
     engineio_logger=False
 )
 socket_app = socketio.ASGIApp(sio, app)
@@ -61,8 +80,8 @@ socket_app = socketio.ASGIApp(sio, app)
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=not _allow_any_origin,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -70,18 +89,23 @@ app.add_middleware(
 # Include Premium (Stripe) routes
 app.include_router(premium_router)
 app.include_router(premium_webhook_router)
+# Settings, account deletion and moderation
+app.include_router(account_router)
 
 
 # ===== AUTHENTICATION ROUTES =====
 
-@app.post("/api/auth/register")
+@app.post("/api/auth/register", dependencies=[Depends(auth_rate_limit)])
 async def register(user_data: UserRegistration):
     """Register new user with email and password"""
+    # Enforce the password policy server-side — the client hint alone is not a rule
+    validate_password_strength(user_data.password)
+
     # Check if user exists
     existing_user = await users_collection.find_one({"email": user_data.email})
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
-    
+
     # Create user
     user_id = await generate_user_id()
     hashed_password = get_password_hash(user_data.password)
@@ -125,17 +149,20 @@ async def register(user_data: UserRegistration):
         "settings": {
             "notifications_enabled": True,
             "distance_preference": 100,
-            "show_age": True,
-            "premium": False
+            "show_age": True
         },
+        # Premium lives at the document root — `premium.py` reads and writes it
+        # there. Keeping a second copy under `settings` guaranteed the two would
+        # drift apart.
+        "premium": False,
         "onboarding_completed": False,
         "created_at": get_utc_now(),
         "updated_at": get_utc_now(),
         "last_active": get_utc_now()
     }
-    
+
     await users_collection.insert_one(new_user)
-    
+
     # Create access token
     access_token = create_access_token({"user_id": user_id})
     
@@ -147,7 +174,7 @@ async def register(user_data: UserRegistration):
     }
 
 
-@app.post("/api/auth/login")
+@app.post("/api/auth/login", dependencies=[Depends(auth_rate_limit)])
 async def login(credentials: UserLogin):
     """Login with email and password"""
     user = await users_collection.find_one({"email": credentials.email})
@@ -180,9 +207,15 @@ async def login(credentials: UserLogin):
     }
 
 
-@app.post("/api/auth/google/callback")
-async def google_callback(session_id: str):
-    """Handle Google OAuth callback"""
+@app.post("/api/auth/google/callback", dependencies=[Depends(auth_rate_limit)])
+async def google_callback(session_id: str = Body(..., embed=True)):
+    """
+    Handle Google OAuth callback.
+
+    `session_id` must be declared as a Body field: a bare `str` parameter is read
+    from the query string by FastAPI, so the JSON body the client sends was
+    rejected with a 422 and Google sign-in never worked.
+    """
     # Get session data from Emergent auth
     session_data = await process_google_session(session_id)
     
@@ -207,7 +240,7 @@ async def google_callback(session_id: str):
 @app.get("/api/auth/me")
 async def get_me(current_user: dict = Depends(get_current_user)):
     """Get current user profile"""
-    return current_user
+    return private_user(current_user)
 
 
 @app.post("/api/auth/logout")
@@ -261,19 +294,24 @@ async def complete_onboarding(
 
 @app.post("/api/profile/photos")
 async def upload_photos(
-    photos: List[str],
+    payload: PhotosUpload,
     current_user: dict = Depends(get_current_user)
 ):
-    """Upload profile photos (base64 encoded, max 5)"""
-    if len(photos) > 5:
-        raise HTTPException(status_code=400, detail="Maximum 5 photos allowed")
-    
+    """
+    Upload profile photos (base64 encoded, max 5).
+
+    Wrapped in a Pydantic model: a bare `List[str]` parameter is read from the
+    query string by FastAPI, so the JSON array the client posts was rejected with
+    a 422 and onboarding silently lost every photo. The model also caps the
+    payload size — base64 images live inside the user document, which MongoDB
+    limits to 16 MB.
+    """
     await users_collection.update_one(
         {"user_id": current_user["user_id"]},
-        {"$set": {"profile.photos": photos, "updated_at": get_utc_now()}}
+        {"$set": {"profile.photos": payload.photos, "updated_at": get_utc_now()}}
     )
-    
-    return {"message": "Photos uploaded", "count": len(photos)}
+
+    return {"message": "Photos uploaded", "count": len(payload.photos)}
 
 
 @app.get("/api/profile/{user_id}")
@@ -282,15 +320,18 @@ async def get_profile(
     current_user: dict = Depends(get_current_user)
 ):
     """Get another user's profile"""
+    # Either side of a block hides the profile from the other
+    await assert_not_blocked(current_user["user_id"], user_id)
+
     user = await users_collection.find_one(
         {"user_id": user_id},
-        {"_id": 0, "password_hash": 0, "google_id": 0}
+        PUBLIC_USER_PROJECTION
     )
-    
+
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
-    return user
+
+    return public_user(user)
 
 
 @app.post("/api/profile/update")
@@ -319,17 +360,16 @@ async def update_profile(
         {"$set": set_ops}
     )
     
-    # Invalidate compat cache for this user
+    # Invalidate compat cache for this user. The id is escaped: user ids are
+    # generated by us, but interpolating any value straight into $regex is how
+    # regex-injection bugs get introduced later.
     from database import db as mongo_db
     await mongo_db.compatibility_cache.delete_many(
-        {"pair_key": {"$regex": current_user["user_id"]}}
+        {"pair_key": {"$regex": re.escape(current_user["user_id"])}}
     )
-    
-    updated = await users_collection.find_one(
-        {"user_id": current_user["user_id"]},
-        {"_id": 0, "password_hash": 0, "google_id": 0}
-    )
-    return updated
+
+    updated = await users_collection.find_one({"user_id": current_user["user_id"]})
+    return private_user(updated)
 
 
 # ===== DISCOVERY & MATCHING ROUTES =====
@@ -355,11 +395,13 @@ async def get_discovery_cards(
         {"user_id": user_id}
     ).to_list(None)
     swiped_ids = [s["target_user_id"] for s in swiped]
-    
-    # Get potential matches (exclude self and already swiped)
-    exclude_ids = swiped_ids + [user_id]
-    
-    # Build filter query
+
+    # Exclude self, already-swiped profiles, and anyone blocked in either direction
+    blocked_ids = await blocked_user_ids(user_id)
+    exclude_ids = list({*swiped_ids, *blocked_ids, user_id})
+
+    # Build filter query. Free-text filters are escaped before reaching $regex:
+    # an unescaped value such as `(a+)+$` triggers catastrophic backtracking.
     query: Dict[str, Any] = {
         "user_id": {"$nin": exclude_ids},
         "onboarding_completed": True,
@@ -369,14 +411,16 @@ async def get_discovery_cards(
     if availability:
         query["profile.availability"] = availability
     if city:
-        query["profile.city"] = {"$regex": f"^{city}$", "$options": "i"}
+        query["profile.city"] = {"$regex": f"^{re.escape(city)}$", "$options": "i"}
     if country:
-        query["profile.country"] = {"$regex": f"^{country}$", "$options": "i"}
-    
+        query["profile.country"] = {"$regex": f"^{re.escape(country)}$", "$options": "i"}
+
+    # Over-fetch so the premium/score sort has candidates to rank, then trim.
+    fetch_size = max(limit * 3, limit)
     candidates = await users_collection.find(
         query,
-        {"_id": 0, "password_hash": 0, "google_id": 0}
-    ).limit(max(limit * 3, limit)).to_list(max(limit * 3, limit))
+        PUBLIC_USER_PROJECTION
+    ).limit(fetch_size).to_list(fetch_size)
     
     if not candidates:
         return {"cards": []}
@@ -387,17 +431,23 @@ async def get_discovery_cards(
         # Check cache first
         cached = await compat_cache.find_one({"pair_key": pair_key}, {"_id": 0})
         if cached and cached.get("compatibility"):
-            return {"user": candidate, "compatibility": cached["compatibility"]}
-        
+            return {"user": public_user(candidate), "compatibility": cached["compatibility"]}
+
         try:
             compatibility = await ai_service.calculate_compatibility(current_user, candidate)
-            # Store in cache
-            await compat_cache.update_one(
-                {"pair_key": pair_key},
-                {"$set": {"pair_key": pair_key, "compatibility": compatibility, "created_at": get_utc_now()}},
-                upsert=True
-            )
-            return {"user": candidate, "compatibility": compatibility}
+            # Only cache real AI verdicts — caching a heuristic fallback would
+            # pin a degraded score to this pair for the whole TTL.
+            if compatibility.get("source") == "ai":
+                await compat_cache.update_one(
+                    {"pair_key": pair_key},
+                    {"$set": {
+                        "pair_key": pair_key,
+                        "compatibility": compatibility,
+                        "created_at": get_utc_now(),
+                    }},
+                    upsert=True
+                )
+            return {"user": public_user(candidate), "compatibility": compatibility}
         except Exception as e:
             print(f"Error computing compatibility: {e}")
             return None
@@ -427,32 +477,28 @@ async def swipe(
     """Swipe on a user"""
     user_id = current_user["user_id"]
     target_id = action.target_user_id
-    
-    # Enforce daily swipe limit for free users
-    from datetime import timezone as _tz
-    today = datetime.now(_tz.utc).strftime("%Y-%m-%d")
-    is_premium = bool(current_user.get("premium", False))
-    daily_limit = 10  # free tier
-    
-    swipes_today = 0
-    if current_user.get("daily_swipes_date") == today:
-        swipes_today = current_user.get("daily_swipes_used", 0)
-    
-    if not is_premium and swipes_today >= daily_limit:
-        raise HTTPException(
-            status_code=402,
-            detail="Daily swipe limit reached. Upgrade to Premium for unlimited swipes."
-        )
-    
+
+    if target_id == user_id:
+        raise HTTPException(status_code=400, detail="You cannot swipe on yourself")
+
+    await assert_not_blocked(user_id, target_id)
+
     # Check if already swiped
     existing = await swipes_collection.find_one({
         "user_id": user_id,
         "target_user_id": target_id
     })
-    
+
     if existing:
         raise HTTPException(status_code=400, detail="Already swiped on this user")
-    
+
+    # Claim one swipe against the daily quota. This is a single atomic
+    # find_one_and_update rather than a read-then-$set: the previous version wrote
+    # back `swipes_today + 1` from a value read at request start, so concurrent
+    # swipes overwrote each other and the free-tier cap could be walked straight
+    # through by firing requests in parallel.
+    swipes_today = await claim_daily_swipe(current_user)
+
     # Record swipe
     swipe_data = {
         "user_id": user_id,
@@ -461,14 +507,7 @@ async def swipe(
         "created_at": get_utc_now()
     }
     await swipes_collection.insert_one(swipe_data)
-    
-    # Increment daily swipe counter
-    await users_collection.update_one(
-        {"user_id": user_id},
-        {"$set": {"daily_swipes_date": today,
-                  "daily_swipes_used": swipes_today + 1}}
-    )
-    
+
     # Check for match (if right swipe)
     if action.direction == "right":
         # Check if target also swiped right
@@ -482,15 +521,15 @@ async def swipe(
             # It's a match!
             target_user = await users_collection.find_one(
                 {"user_id": target_id},
-                {"_id": 0, "password_hash": 0}
+                PUBLIC_USER_PROJECTION
             )
-            
+
             # Calculate compatibility
             compatibility = await ai_service.calculate_compatibility(
                 current_user,
                 target_user
             )
-            
+
             # Create match
             match_data = {
                 "match_id": f"match_{user_id[:6]}_{target_id[:6]}_{get_utc_now().timestamp()}",
@@ -501,52 +540,158 @@ async def swipe(
                 "created_at": get_utc_now()
             }
             await matches_collection.insert_one(match_data)
-            
+
+            await gamification.award_many([user_id, target_id], "matches_count")
+
+            # Notify the other side in real time if they have a socket open
+            await sio.emit("new_match", {
+                "match_id": match_data["match_id"],
+                "user": public_user(current_user),
+                "compatibility": compatibility,
+            }, room=f"user:{target_id}")
+
             return {
                 "matched": True,
                 "match_id": match_data["match_id"],
-                "user": target_user,
-                "compatibility": compatibility
+                "user": public_user(target_user),
+                "compatibility": compatibility,
+                "swipes_used_today": swipes_today,
             }
-    
-    return {"matched": False}
+
+    return {"matched": False, "swipes_used_today": swipes_today}
 
 
 @app.get("/api/matches")
 async def get_matches(
     current_user: dict = Depends(get_current_user)
 ):
-    """Get user's matches"""
+    """
+    Get user's matches, each with its unread count and last message.
+
+    The list is ordered by most recent activity rather than match date, so an
+    active conversation stays at the top.
+    """
     user_id = current_user["user_id"]
-    
+
     matches = await matches_collection.find({
         "$or": [
             {"user1_id": user_id},
             {"user2_id": user_id}
         ]
     }, {"_id": 0}).sort("created_at", -1).to_list(None)
-    
-    # Populate match user data
+
+    if not matches:
+        return {"matches": [], "total_unread": 0}
+
+    hidden = await blocked_user_ids(user_id)
+
+    # Batch the two lookups instead of querying per match
+    other_ids = []
+    for match in matches:
+        other_id = match["user2_id"] if match["user1_id"] == user_id else match["user1_id"]
+        if other_id not in hidden:
+            other_ids.append(other_id)
+
+    users = await users_collection.find(
+        {"user_id": {"$in": other_ids}}, PUBLIC_USER_PROJECTION
+    ).to_list(None)
+    users_by_id = {u["user_id"]: public_user(u) for u in users}
+
+    match_ids = [m["match_id"] for m in matches]
+    unread_counts = {
+        row["_id"]: row["count"]
+        for row in await messages_collection.aggregate([
+            {"$match": {
+                "match_id": {"$in": match_ids},
+                "sender_id": {"$ne": user_id},
+                "read": False,
+            }},
+            {"$group": {"_id": "$match_id", "count": {"$sum": 1}}},
+        ]).to_list(None)
+    }
+
+    last_messages = {
+        row["_id"]: row["last"]
+        for row in await messages_collection.aggregate([
+            {"$match": {"match_id": {"$in": match_ids}}},
+            {"$sort": {"created_at": 1}},
+            {"$group": {"_id": "$match_id", "last": {"$last": "$$ROOT"}}},
+        ]).to_list(None)
+    }
+
     result = []
     for match in matches:
         other_id = match["user2_id"] if match["user1_id"] == user_id else match["user1_id"]
-        other_user = await users_collection.find_one(
-            {"user_id": other_id},
-            {"_id": 0, "password_hash": 0, "google_id": 0}
-        )
-        
-        if other_user:
-            result.append({
-                "match_id": match["match_id"],
-                "user": other_user,
-                "compatibility": match.get("compatibility_score"),
-                "created_at": match["created_at"]
-            })
-    
-    return {"matches": result}
+        other_user = users_by_id.get(other_id)
+        if not other_user:
+            continue
+
+        last = last_messages.get(match["match_id"])
+        result.append({
+            "match_id": match["match_id"],
+            "user": other_user,
+            "compatibility": match.get("compatibility_score"),
+            "created_at": match["created_at"],
+            "unread_count": unread_counts.get(match["match_id"], 0),
+            "last_message": {
+                "content": last["content"],
+                "sender_id": last["sender_id"],
+                "created_at": last["created_at"],
+            } if last else None,
+            "last_activity": last["created_at"] if last else match["created_at"],
+        })
+
+    result.sort(key=lambda m: m["last_activity"], reverse=True)
+
+    return {
+        "matches": result,
+        "total_unread": sum(m["unread_count"] for m in result),
+    }
+
+
+@app.delete("/api/matches/{match_id}")
+async def unmatch(
+    match_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Remove a match, along with its messages and deal room.
+
+    Either participant can unmatch; the other side simply stops seeing the
+    conversation.
+    """
+    match = await matches_collection.find_one({"match_id": match_id})
+    if not match:
+        raise HTTPException(status_code=404, detail="Match not found")
+
+    if current_user["user_id"] not in [match["user1_id"], match["user2_id"]]:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    await messages_collection.delete_many({"match_id": match_id})
+    await deal_rooms_collection.delete_many({"match_id": match_id})
+    await matches_collection.delete_one({"match_id": match_id})
+
+    other_id = (
+        match["user2_id"] if match["user1_id"] == current_user["user_id"] else match["user1_id"]
+    )
+    await sio.emit("match_removed", {"match_id": match_id}, room=f"user:{other_id}")
+
+    return {"unmatched": True, "match_id": match_id}
 
 
 # ===== CHAT ROUTES =====
+
+async def require_match_participant(match_id: str, user_id: str) -> Dict[str, Any]:
+    """Load a match, asserting the caller is one of its two participants."""
+    match = await matches_collection.find_one({"match_id": match_id})
+    if not match:
+        raise HTTPException(status_code=404, detail="Match not found")
+
+    if user_id not in [match["user1_id"], match["user2_id"]]:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    return match
+
 
 @app.get("/api/chat/{match_id}/messages")
 async def get_messages(
@@ -554,22 +699,61 @@ async def get_messages(
     limit: int = 50,
     current_user: dict = Depends(get_current_user)
 ):
-    """Get messages for a match"""
-    # Verify user is part of match
-    match = await matches_collection.find_one({"match_id": match_id})
-    if not match:
-        raise HTTPException(status_code=404, detail="Match not found")
-    
+    """
+    Get messages for a match and mark the other side's messages as read.
+
+    Opening the conversation is the read receipt — the `read` flag was written as
+    False on every message and never updated, so unread counts were impossible.
+    """
     user_id = current_user["user_id"]
-    if user_id not in [match["user1_id"], match["user2_id"]]:
-        raise HTTPException(status_code=403, detail="Not authorized")
-    
+    await require_match_participant(match_id, user_id)
+
     messages = await messages_collection.find(
         {"match_id": match_id},
         {"_id": 0}
     ).sort("created_at", 1).limit(limit).to_list(limit)
-    
+
+    result = await messages_collection.update_many(
+        {"match_id": match_id, "sender_id": {"$ne": user_id}, "read": False},
+        {"$set": {"read": True, "read_at": get_utc_now()}},
+    )
+
+    if result.modified_count:
+        # Let the sender's open chat window flip its delivery ticks
+        await sio.emit(
+            "messages_read",
+            {"match_id": match_id, "reader_id": user_id},
+            room=match_id,
+        )
+        for message in messages:
+            if message.get("sender_id") != user_id:
+                message["read"] = True
+
     return {"messages": messages}
+
+
+@app.post("/api/chat/{match_id}/read")
+async def mark_messages_read(
+    match_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Mark every message from the other participant as read."""
+    user_id = current_user["user_id"]
+    await require_match_participant(match_id, user_id)
+
+    result = await messages_collection.update_many(
+        {"match_id": match_id, "sender_id": {"$ne": user_id}, "read": False},
+        {"$set": {"read": True, "read_at": get_utc_now()}},
+    )
+
+    if result.modified_count:
+        await sio.emit(
+            "messages_read",
+            {"match_id": match_id, "reader_id": user_id},
+            room=match_id,
+        )
+
+    return {"marked_read": result.modified_count}
 
 
 @app.post("/api/chat/{match_id}/send")
@@ -578,31 +762,50 @@ async def send_message(
     message: MessageCreate,
     current_user: dict = Depends(get_current_user)
 ):
-    """Send a message"""
-    # Verify match
-    match = await matches_collection.find_one({"match_id": match_id})
-    if not match:
-        raise HTTPException(status_code=404, detail="Match not found")
-    
+    """Send a message and broadcast it to the match room."""
     user_id = current_user["user_id"]
-    if user_id not in [match["user1_id"], match["user2_id"]]:
-        raise HTTPException(status_code=403, detail="Not authorized")
-    
+    match = await require_match_participant(match_id, user_id)
+
+    content = message.content.strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="Message cannot be empty")
+
     # Create message
     msg_data = {
         "message_id": f"msg_{get_utc_now().timestamp()}",
         "match_id": match_id,
         "sender_id": user_id,
-        "content": message.content,
+        "content": content,
         "type": message.type,
         "read": False,
         "created_at": get_utc_now()
     }
     await messages_collection.insert_one(msg_data)
-    
-    # Emit via Socket.io
-    await sio.emit("new_message", msg_data, room=match_id)
-    
+
+    # Build a JSON-safe payload *before* emitting: insert_one mutates msg_data
+    # with a non-serializable ObjectId, and `created_at` is a datetime, so the
+    # previous emit could not be encoded by the Socket.io JSON packer.
+    payload = {
+        "message_id": msg_data["message_id"],
+        "match_id": match_id,
+        "sender_id": user_id,
+        "content": content,
+        "type": msg_data["type"],
+        "read": False,
+        "created_at": msg_data["created_at"].isoformat(),
+    }
+
+    await sio.emit("new_message", payload, room=match_id)
+
+    # Also nudge the recipient's personal room so their matches list can refresh
+    # its unread badge even when the chat screen is closed.
+    other_id = match["user2_id"] if match["user1_id"] == user_id else match["user1_id"]
+    await sio.emit("message_notification", {
+        "match_id": match_id,
+        "sender_id": user_id,
+        "preview": content[:120],
+    }, room=f"user:{other_id}")
+
     msg_data.pop("_id", None)
     return msg_data
 
@@ -643,7 +846,11 @@ async def create_deal_room(
     }
     
     await deal_rooms_collection.insert_one(room_data)
-    
+
+    # Spinning up a deal room is the moment a match becomes a company attempt —
+    # credit both founders.
+    await gamification.award_many(room_data["participants"], "startups_created")
+
     room_data.pop("_id", None)
     return room_data
 
@@ -664,7 +871,7 @@ async def get_deal_room(
     return room
 
 
-@app.post("/api/deal-rooms/{room_id}/generate-roadmap")
+@app.post("/api/deal-rooms/{room_id}/generate-roadmap", dependencies=[Depends(ai_rate_limit)])
 async def generate_roadmap(
     room_id: str,
     current_user: dict = Depends(get_current_user)
@@ -694,13 +901,20 @@ async def generate_roadmap(
         participants_skills=all_skills,
         duration_days=90
     )
-    
+
+    if not roadmap.get("phases"):
+        # Don't overwrite a previously generated roadmap with an empty one
+        raise HTTPException(
+            status_code=503,
+            detail="Roadmap generation is temporarily unavailable. Please try again shortly."
+        )
+
     # Update room
     await deal_rooms_collection.update_one(
         {"room_id": room_id},
         {"$set": {"roadmap": roadmap, "updated_at": get_utc_now()}}
     )
-    
+
     return roadmap
 
 
@@ -802,7 +1016,9 @@ async def create_project(
     
     await projects_collection.insert_one(project_data)
     project_data.pop("_id", None)
-    
+
+    await gamification.award(current_user["user_id"], "projects_count")
+
     return project_data
 
 
@@ -824,8 +1040,9 @@ async def get_projects(
     if looking_for:
         query["looking_for"] = looking_for
     if skill:
-        # Case-insensitive skill match
-        query["skills_needed"] = {"$regex": f"^{skill}$", "$options": "i"}
+        # Case-insensitive exact skill match, escaped so a value like `(a+)+$`
+        # cannot turn into a catastrophic-backtracking regex.
+        query["skills_needed"] = {"$regex": f"^{re.escape(skill)}$", "$options": "i"}
     hours_query = {}
     if min_hours is not None:
         hours_query["$gte"] = min_hours
@@ -847,36 +1064,196 @@ async def get_projects(
         if my_city:
             # Find user_ids in same city
             same_city_users = await users_collection.find(
-                {"profile.city": {"$regex": f"^{my_city}$", "$options": "i"}},
+                {"profile.city": {"$regex": f"^{re.escape(my_city)}$", "$options": "i"}},
                 {"user_id": 1, "_id": 0}
             ).to_list(1000)
             city_user_ids = [u["user_id"] for u in same_city_users]
             query["user_id"] = {"$in": city_user_ids}
-    
+
+    # Hide postings from users blocked in either direction
+    hidden = await blocked_user_ids(current_user["user_id"])
+    if hidden:
+        existing_user_filter = query.get("user_id")
+        if isinstance(existing_user_filter, dict) and "$in" in existing_user_filter:
+            query["user_id"] = {
+                "$in": [uid for uid in existing_user_filter["$in"] if uid not in hidden]
+            }
+        else:
+            query["user_id"] = {"$nin": list(hidden)}
+
     projects = await projects_collection.find(
         query,
         {"_id": 0}
     ).sort("created_at", -1).limit(limit).to_list(limit)
-    
-    return {"projects": projects}
+
+    return {"projects": [_project_summary(p, current_user["user_id"]) for p in projects]}
+
+
+@app.get("/api/projects/mine")
+async def get_my_projects(current_user: dict = Depends(get_current_user)):
+    """
+    The current user's own postings, with applicant counts.
+
+    Declared before `/api/projects/{project_id}` so the literal path wins over the
+    parameterised one.
+    """
+    projects = await projects_collection.find(
+        {"user_id": current_user["user_id"]}, {"_id": 0}
+    ).sort("created_at", -1).to_list(None)
+
+    return {"projects": [_project_summary(p, current_user["user_id"]) for p in projects]}
+
+
+@app.get("/api/projects/{project_id}")
+async def get_project(
+    project_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Project detail, including the poster's public profile."""
+    project = await projects_collection.find_one({"project_id": project_id}, {"_id": 0})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    await assert_not_blocked(current_user["user_id"], project["user_id"])
+
+    owner = await users_collection.find_one(
+        {"user_id": project["user_id"]}, PUBLIC_USER_PROJECTION
+    )
+
+    return {
+        **_project_summary(project, current_user["user_id"]),
+        "owner": public_user(owner),
+    }
+
+
+@app.post("/api/projects/{project_id}/apply")
+async def apply_to_project(
+    project_id: str,
+    application: ProjectApplication,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Apply to a cofounder opportunity.
+
+    The `applicants` array has existed on every project document since the first
+    version but nothing ever wrote to it — there was no way to answer a posting.
+    """
+    project = await projects_collection.find_one({"project_id": project_id})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    user_id = current_user["user_id"]
+    if project["user_id"] == user_id:
+        raise HTTPException(status_code=400, detail="You cannot apply to your own project")
+
+    await assert_not_blocked(user_id, project["user_id"])
+
+    if project.get("status") != "open":
+        raise HTTPException(status_code=400, detail="This opportunity is closed")
+
+    if any(a.get("user_id") == user_id for a in project.get("applicants") or []):
+        raise HTTPException(status_code=400, detail="You already applied to this project")
+
+    applicant = {
+        "user_id": user_id,
+        "message": application.message.strip(),
+        "status": "pending",
+        "created_at": get_utc_now(),
+    }
+
+    await projects_collection.update_one(
+        {"project_id": project_id},
+        {"$push": {"applicants": applicant}, "$set": {"updated_at": get_utc_now()}}
+    )
+
+    await sio.emit("project_application", {
+        "project_id": project_id,
+        "project_title": project.get("title"),
+    }, room=f"user:{project['user_id']}")
+
+    return {"applied": True, "project_id": project_id}
+
+
+@app.get("/api/projects/{project_id}/applicants")
+async def get_project_applicants(
+    project_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """List applicants with their public profiles. Owner only."""
+    project = await projects_collection.find_one({"project_id": project_id}, {"_id": 0})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    if project["user_id"] != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    applicants = project.get("applicants") or []
+    if not applicants:
+        return {"applicants": []}
+
+    users = await users_collection.find(
+        {"user_id": {"$in": [a["user_id"] for a in applicants]}}, PUBLIC_USER_PROJECTION
+    ).to_list(None)
+    users_by_id = {u["user_id"]: public_user(u) for u in users}
+
+    return {
+        "applicants": [
+            {**a, "user": users_by_id.get(a["user_id"])}
+            for a in applicants
+            if users_by_id.get(a["user_id"])
+        ]
+    }
+
+
+@app.patch("/api/projects/{project_id}/status")
+async def update_project_status(
+    project_id: str,
+    status: str = Body(..., embed=True),
+    current_user: dict = Depends(get_current_user)
+):
+    """Open or close a posting. Owner only."""
+    if status not in ("open", "closed"):
+        raise HTTPException(status_code=400, detail="Status must be 'open' or 'closed'")
+
+    project = await projects_collection.find_one({"project_id": project_id})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project["user_id"] != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    await projects_collection.update_one(
+        {"project_id": project_id},
+        {"$set": {"status": status, "updated_at": get_utc_now()}}
+    )
+    return {"project_id": project_id, "status": status}
+
+
+def _project_summary(project: Dict[str, Any], viewer_id: str) -> Dict[str, Any]:
+    """
+    Shape a project for a listing.
+
+    The raw `applicants` array names everyone who applied, so it is replaced by a
+    count plus a flag for the viewer — only the owner gets the full list, via
+    `/api/projects/{id}/applicants`.
+    """
+    applicants = project.get("applicants") or []
+    summary = {k: v for k, v in project.items() if k != "applicants"}
+    summary["applicants_count"] = len(applicants)
+    summary["has_applied"] = any(a.get("user_id") == viewer_id for a in applicants)
+    summary["is_owner"] = project.get("user_id") == viewer_id
+    return summary
 
 
 # ===== AI ASSISTANT ROUTES =====
 
-@app.get("/api/ai/business-ideas/{match_id}")
+@app.get("/api/ai/business-ideas/{match_id}", dependencies=[Depends(ai_rate_limit)])
 async def get_business_ideas(
     match_id: str,
     current_user: dict = Depends(get_current_user)
 ):
     """Generate business ideas for a match"""
-    match = await matches_collection.find_one({"match_id": match_id})
-    if not match:
-        raise HTTPException(status_code=404, detail="Match not found")
-    
-    user_id = current_user["user_id"]
-    if user_id not in [match["user1_id"], match["user2_id"]]:
-        raise HTTPException(status_code=403, detail="Not authorized")
-    
+    match = await require_match_participant(match_id, current_user["user_id"])
+
     # Get both users
     user1 = await users_collection.find_one(
         {"user_id": match["user1_id"]},
@@ -892,7 +1269,15 @@ async def get_business_ideas(
         user2.get("profile", {}),
         count=5
     )
-    
+
+    if not ideas:
+        # Be explicit instead of returning one hardcoded "SaaS Platform" idea
+        # dressed up as a tailored AI suggestion.
+        raise HTTPException(
+            status_code=503,
+            detail="Idea generation is temporarily unavailable. Please try again shortly."
+        )
+
     return {"ideas": ideas}
 
 
@@ -900,11 +1285,11 @@ async def get_business_ideas(
 
 
 class AICopilotRequest(BaseModel):
-    message: str
+    message: str = Field(min_length=1, max_length=4000)
     history: List[Dict[str, str]] = []
 
 
-@app.post("/api/ai/copilot/chat")
+@app.post("/api/ai/copilot/chat", dependencies=[Depends(ai_rate_limit)])
 async def copilot_chat(
     payload: AICopilotRequest,
     current_user: dict = Depends(get_current_user)
@@ -970,40 +1355,95 @@ async def root():
 
 # ===== SOCKET.IO EVENTS =====
 
+async def _authenticate_socket(auth: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """
+    Resolve the user behind a socket handshake.
+
+    Accepts the same bearer token as the REST API, so the client can reuse the
+    token it already holds.
+    """
+    token = (auth or {}).get("token")
+    if not token:
+        return None
+    try:
+        return await get_current_user(authorization=f"Bearer {token}")
+    except HTTPException:
+        return None
+
+
 @sio.event
-async def connect(sid, environ):
-    print(f"Client connected: {sid}")
+async def connect(sid, environ, auth=None):
+    """
+    Authenticate the socket and put it in the user's personal room.
+
+    Connections used to be anonymous, which meant a socket could join any match
+    room and read another pair's messages. The token is now resolved up front and
+    stored in the session; unauthenticated handshakes are refused.
+    """
+    user = await _authenticate_socket(auth)
+    if not user:
+        return False  # refuses the connection
+
+    await sio.save_session(sid, {"user_id": user["user_id"]})
+    # Personal room for match/message notifications outside an open chat
+    await sio.enter_room(sid, f"user:{user['user_id']}")
+    await sio.emit("connected", {"user_id": user["user_id"]}, room=sid)
 
 
 @sio.event
 async def disconnect(sid):
-    print(f"Client disconnected: {sid}")
+    pass
+
+
+async def _socket_user_id(sid) -> Optional[str]:
+    session = await sio.get_session(sid)
+    return (session or {}).get("user_id")
 
 
 @sio.event
 async def join_match(sid, data):
-    """Join a match room for real-time chat"""
-    match_id = data.get("match_id")
-    if match_id:
-        sio.enter_room(sid, match_id)
-        await sio.emit("joined", {"match_id": match_id}, room=sid)
+    """Join a match room for real-time chat, if the caller belongs to that match."""
+    match_id = (data or {}).get("match_id")
+    user_id = await _socket_user_id(sid)
+    if not match_id or not user_id:
+        return
+
+    match = await matches_collection.find_one(
+        {"match_id": match_id}, {"_id": 0, "user1_id": 1, "user2_id": 1}
+    )
+    if not match or user_id not in [match["user1_id"], match["user2_id"]]:
+        await sio.emit("join_error", {"match_id": match_id}, room=sid)
+        return
+
+    await sio.enter_room(sid, match_id)
+    await sio.emit("joined", {"match_id": match_id}, room=sid)
 
 
 @sio.event
 async def leave_match(sid, data):
     """Leave a match room"""
-    match_id = data.get("match_id")
+    match_id = (data or {}).get("match_id")
     if match_id:
-        sio.leave_room(sid, match_id)
+        await sio.leave_room(sid, match_id)
 
 
 @sio.event
 async def typing(sid, data):
-    """User is typing"""
-    match_id = data.get("match_id")
-    user_id = data.get("user_id")
-    if match_id:
-        await sio.emit("user_typing", {"user_id": user_id}, room=match_id, skip_sid=sid)
+    """
+    Relay a typing indicator to the other participant.
+
+    The user id comes from the authenticated session rather than the payload, so a
+    client cannot type on someone else's behalf.
+    """
+    match_id = (data or {}).get("match_id")
+    user_id = await _socket_user_id(sid)
+    if match_id and user_id:
+        await sio.emit(
+            "user_typing",
+            {"user_id": user_id, "match_id": match_id, "typing": bool((data or {}).get("typing", True))},
+            room=match_id,
+            skip_sid=sid,
+        )
 
 
 if __name__ == "__main__":

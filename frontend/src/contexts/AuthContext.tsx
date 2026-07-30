@@ -8,14 +8,44 @@ import * as Linking from 'expo-linking';
 import { Platform } from 'react-native';
 import { storage } from '@/src/utils/storage';
 import { api, setUnauthorizedHandler } from '@/src/api/client';
+import { disconnectSocket } from '@/src/lib/socket';
 
 WebBrowser.maybeCompleteAuthSession();
 
-interface User {
+export interface UserVerification {
+  email_verified: boolean;
+  linkedin_verified: boolean;
+  github_verified: boolean;
+  portfolio_verified: boolean;
+  identity_verified: boolean;
+}
+
+export interface UserGamification {
+  level: number;
+  projects_count: number;
+  startups_created: number;
+  recommendations_count: number;
+  badges: string[];
+}
+
+export interface UserSettings {
+  notifications_enabled: boolean;
+  distance_preference: number;
+  show_age: boolean;
+}
+
+export interface User {
   user_id: string;
   email: string;
   profile: any;
   onboarding_completed: boolean;
+  /** Premium lives at the document root — screens read `user.premium`. */
+  premium?: boolean;
+  premium_plan?: string | null;
+  premium_since?: string | null;
+  verification?: Partial<UserVerification>;
+  gamification?: Partial<UserGamification>;
+  settings?: Partial<UserSettings>;
 }
 
 interface AuthContextType {
@@ -37,6 +67,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     // Setup 401 handler to force logout + redirect
     setUnauthorizedHandler(() => {
+      disconnectSocket();
       setUser(null);
     });
     
@@ -139,6 +170,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.error('Logout error:', error);
     } finally {
       await storage.secureRemove('auth_token');
+      // Tear down the socket too, otherwise it stays authenticated as the
+      // previous user and keeps receiving their notifications.
+      disconnectSocket();
       setUser(null);
     }
   };

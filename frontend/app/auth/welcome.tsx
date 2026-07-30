@@ -66,7 +66,7 @@ export default function WelcomeScreen() {
 
           <View style={styles.heroSection}>
             <Text style={styles.headline}>
-              Meet the person{'\n'}you'll build{'\n'}your next{'\n'}
+              Meet the person{'\n'}you&apos;ll build{'\n'}your next{'\n'}
               <Text style={styles.headlineAccent}>company</Text> with.
             </Text>
             <Text style={styles.subheadline}>

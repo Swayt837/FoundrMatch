@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  frontend:
+    name: Frontend (typecheck + lint)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: yarn
+          cache-dependency-path: frontend/yarn.lock
+
+      - run: yarn install --frozen-lockfile
+
+      # Catches the class of bug where a screen reads a field that the User type
+      # never declared — Expo's bundler does not typecheck, so nothing else would.
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npx eslint .
+
+  backend:
+    name: Backend (compile + unit tests)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Syntax check every module
+        run: python -m compileall -q .
+
+      # requirements.txt pins a privately hosted litellm wheel and the
+      # emergentintegrations SDK, which CI cannot fetch. The unit suites are
+      # written to need none of that, so only their dependencies are installed
+      # here. The API-level suites in this folder target a deployed backend and
+      # are excluded.
+      - name: Install test dependencies
+        run: pip install pytest pytest-asyncio pydantic fastapi motor python-dotenv
+
+      - name: Unit tests
+        run: >-
+          pytest tests/test_serializers.py tests/test_compatibility.py
+          tests/test_gamification.py tests/test_rate_limit.py
+          -o addopts='' -q

@@ -4,12 +4,64 @@
 import Constants from 'expo-constants';
 import { storage } from '@/src/utils/storage';
 
-const API_URL = Constants.expoConfig?.extra?.EXPO_PUBLIC_BACKEND_URL || process.env.EXPO_PUBLIC_BACKEND_URL;
+export const API_URL: string | undefined =
+  Constants.expoConfig?.extra?.EXPO_PUBLIC_BACKEND_URL || process.env.EXPO_PUBLIC_BACKEND_URL;
+
+if (!API_URL) {
+  // Without this the base URL silently became "undefined/api" and every request
+  // failed with an opaque network error.
+  console.error(
+    '[api] EXPO_PUBLIC_BACKEND_URL is not set. Copy frontend/.env.example to ' +
+      'frontend/.env (or set it in app.json > expo.extra) and restart the bundler.'
+  );
+}
+
+/**
+ * Error thrown for any non-2xx response.
+ *
+ * Carries the HTTP status so callers can branch on it — `402` for the daily
+ * swipe limit, `429` for rate limiting — instead of matching on message text,
+ * which broke as soon as the server reworded a detail string.
+ */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly detail: string;
+
+  constructor(status: number, detail: string) {
+    super(detail);
+    this.name = 'ApiError';
+    this.status = status;
+    this.detail = detail;
+  }
+
+  /** Free-tier swipe allowance exhausted. */
+  get isPaymentRequired() {
+    return this.status === 402;
+  }
+
+  get isRateLimited() {
+    return this.status === 429;
+  }
+
+  get isNotFound() {
+    return this.status === 404;
+  }
+}
 
 let unauthorizedHandler: (() => void) | null = null;
 
 export function setUnauthorizedHandler(handler: () => void) {
   unauthorizedHandler = handler;
+}
+
+function toQueryString(params: Record<string, unknown>): string {
+  const qs = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') {
+      qs.append(key, String(value));
+    }
+  });
+  return qs.toString();
 }
 
 class APIClient {
@@ -34,7 +86,7 @@ class APIClient {
 
   async request(endpoint: string, options: RequestInit = {}) {
     const headers = await this.getAuthHeader();
-    
+
     const config: RequestInit = {
       ...options,
       headers: {
@@ -44,19 +96,22 @@ class APIClient {
     };
 
     const response = await fetch(`${this.baseURL}${endpoint}`, config);
-    
+
     if (response.status === 401) {
       // Token expired or invalid
       await storage.secureRemove('auth_token');
       if (unauthorizedHandler) unauthorizedHandler();
-      throw new Error('Unauthorized');
+      throw new ApiError(401, 'Unauthorized');
     }
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
-      throw new Error(error.detail || 'Request failed');
+      const body = await response.json().catch(() => ({}));
+      const detail =
+        typeof body?.detail === 'string' ? body.detail : `Request failed (${response.status})`;
+      throw new ApiError(response.status, detail);
     }
 
+    if (response.status === 204) return null;
     return response.json();
   }
 
@@ -99,9 +154,10 @@ class APIClient {
   }
 
   async uploadPhotos(photos: string[]) {
+    // Wrapped in an object: the endpoint expects a JSON body `{ photos: [...] }`.
     return this.request('/profile/photos', {
       method: 'POST',
-      body: JSON.stringify(photos),
+      body: JSON.stringify({ photos }),
     });
   }
 
@@ -132,6 +188,14 @@ class APIClient {
       method: 'POST',
       body: JSON.stringify({ match_id: matchId, content }),
     });
+  }
+
+  async markMessagesRead(matchId: string) {
+    return this.request(`/chat/${matchId}/read`, { method: 'POST' });
+  }
+
+  async unmatch(matchId: string) {
+    return this.request(`/matches/${matchId}`, { method: 'DELETE' });
   }
 
   // Deal Rooms
@@ -179,6 +243,32 @@ class APIClient {
 
   async getProjects(status: string = 'open', limit: number = 20) {
     return this.request(`/projects?status=${status}&limit=${limit}`);
+  }
+
+  async getProject(projectId: string) {
+    return this.request(`/projects/${projectId}`);
+  }
+
+  async getMyProjects() {
+    return this.request('/projects/mine');
+  }
+
+  async applyToProject(projectId: string, message: string = '') {
+    return this.request(`/projects/${projectId}/apply`, {
+      method: 'POST',
+      body: JSON.stringify({ message }),
+    });
+  }
+
+  async getProjectApplicants(projectId: string) {
+    return this.request(`/projects/${projectId}/applicants`);
+  }
+
+  async setProjectStatus(projectId: string, status: 'open' | 'closed') {
+    return this.request(`/projects/${projectId}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    });
   }
 
   // AI
@@ -230,11 +320,7 @@ class APIClient {
     city?: string;
     country?: string;
   }) {
-    const qs = new URLSearchParams();
-    Object.entries(params).forEach(([k, v]) => {
-      if (v !== undefined && v !== null && v !== '') qs.append(k, String(v));
-    });
-    return this.request(`/discovery/cards?${qs.toString()}`);
+    return this.request(`/discovery/cards?${toQueryString(params)}`);
   }
 
   async getProjectsFiltered(params: {
@@ -248,11 +334,56 @@ class APIClient {
     max_equity?: number;
     my_city_only?: boolean;
   }) {
-    const qs = new URLSearchParams();
-    Object.entries(params).forEach(([k, v]) => {
-      if (v !== undefined && v !== null && v !== '') qs.append(k, String(v));
+    return this.request(`/projects?${toQueryString(params)}`);
+  }
+
+  // Settings
+  async getSettings() {
+    return this.request('/settings');
+  }
+
+  async updateSettings(updates: {
+    notifications_enabled?: boolean;
+    distance_preference?: number;
+    show_age?: boolean;
+  }) {
+    return this.request('/settings', {
+      method: 'PATCH',
+      body: JSON.stringify(updates),
     });
-    return this.request(`/projects?${qs.toString()}`);
+  }
+
+  // Moderation
+  async blockUser(userId: string) {
+    return this.request(`/users/${userId}/block`, { method: 'POST' });
+  }
+
+  async unblockUser(userId: string) {
+    return this.request(`/users/${userId}/block`, { method: 'DELETE' });
+  }
+
+  async getBlockedUsers() {
+    return this.request('/users/blocked');
+  }
+
+  async reportUser(
+    userId: string,
+    reason: string,
+    details: string = '',
+    alsoBlock: boolean = true
+  ) {
+    return this.request(`/users/${userId}/report`, {
+      method: 'POST',
+      body: JSON.stringify({ reason, details, also_block: alsoBlock }),
+    });
+  }
+
+  /** Irreversible. The backend requires the literal confirmation string. */
+  async deleteAccount() {
+    return this.request('/account', {
+      method: 'DELETE',
+      body: JSON.stringify({ confirm: 'DELETE' }),
+    });
   }
 }
 

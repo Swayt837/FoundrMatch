@@ -336,7 +336,7 @@ export default function DealRoomScreen() {
                 </View>
                 <Text style={styles.emptyRoadmapTitle}>No roadmap yet</Text>
                 <Text style={styles.emptyRoadmapText}>
-                  Let AI generate a 90-day roadmap tailored to your team's skills and vision.
+                  Let AI generate a 90-day roadmap tailored to your team&apos;s skills and vision.
                 </Text>
                 <TouchableOpacity
                   style={[styles.ctaButton, generatingRoadmap && styles.buttonDisabled]}

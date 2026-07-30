@@ -60,6 +60,8 @@ export default function RootLayout() {
               <Stack.Screen name="profile/edit" options={{ presentation: 'modal' }} />
               <Stack.Screen name="profile/[id]" options={{ presentation: 'card' }} />
               <Stack.Screen name="project/create" options={{ presentation: 'modal' }} />
+              <Stack.Screen name="project/[id]" options={{ presentation: 'card' }} />
+              <Stack.Screen name="settings/index" options={{ presentation: 'card' }} />
               <Stack.Screen name="premium/index" options={{ presentation: 'modal' }} />
               <Stack.Screen name="premium/success" options={{ presentation: 'card' }} />
             </Stack>

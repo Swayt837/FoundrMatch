@@ -2,6 +2,39 @@
  * CoFound Premium Design System
  * "Glass / Luxe" - Dark cinematic Apple-like aesthetic
  */
+import { Platform, ViewStyle } from 'react-native';
+
+interface ElevationSpec {
+  /** Vertical offset in px. */
+  y: number;
+  /** Native shadowRadius; the web blur radius is twice this, which matches visually. */
+  radius: number;
+  opacity: number;
+  /** Android elevation. */
+  android: number;
+  /** Shadow colour as "r, g, b". Defaults to black. */
+  rgb?: string;
+}
+
+/**
+ * Build a platform-appropriate shadow.
+ *
+ * Web gets `boxShadow` — the `shadow*` props are deprecated there and produced a
+ * console warning on every screen — while native keeps the original
+ * `shadow*`/`elevation` values so the rendering is unchanged.
+ */
+function elevation({ y, radius, opacity, android, rgb = '0, 0, 0' }: ElevationSpec): ViewStyle {
+  if (Platform.OS === 'web') {
+    return { boxShadow: `0px ${y}px ${radius * 2}px rgba(${rgb}, ${opacity})` };
+  }
+  return {
+    shadowColor: `rgb(${rgb})`,
+    shadowOffset: { width: 0, height: y },
+    shadowOpacity: opacity,
+    shadowRadius: radius,
+    elevation: android,
+  };
+}
 
 export const theme = {
   colors: {
@@ -137,35 +170,20 @@ export const theme = {
     },
   },
   
+  /**
+   * Elevation helpers.
+   *
+   * React Native 0.75+ and react-native-web deprecated the `shadow*` style props
+   * in favour of `boxShadow`, which was the source of the console warning present
+   * since iteration 4. Native platforms keep using `shadow*`/`elevation`, so the
+   * helpers are platform-split rather than swapped outright.
+   */
   shadow: {
-    subtle: {
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.15,
-      shadowRadius: 4,
-      elevation: 2,
-    },
-    medium: {
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.25,
-      shadowRadius: 12,
-      elevation: 4,
-    },
-    strong: {
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 8 },
-      shadowOpacity: 0.35,
-      shadowRadius: 24,
-      elevation: 8,
-    },
-    goldGlow: {
-      shadowColor: '#D4AF37',
-      shadowOffset: { width: 0, height: 0 },
-      shadowOpacity: 0.3,
-      shadowRadius: 16,
-      elevation: 6,
-    },
+    subtle: elevation({ y: 2, radius: 4, opacity: 0.15, android: 2 }),
+    medium: elevation({ y: 4, radius: 12, opacity: 0.25, android: 4 }),
+    strong: elevation({ y: 8, radius: 24, opacity: 0.35, android: 8 }),
+    // Antique gold #D4AF37
+    goldGlow: elevation({ y: 0, radius: 16, opacity: 0.3, android: 6, rgb: '212, 175, 55' }),
   },
 };
 

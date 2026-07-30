@@ -1,36 +1,156 @@
 """
-AI Services using Claude for compatibility scoring and business assistance
+AI Services using Claude for compatibility scoring and business assistance.
+
+Every LLM call goes through `_ask_json`, which extracts JSON out of whatever the
+model returned, validates it against a Pydantic schema and retries once before
+giving up. When the model is unavailable the caller gets a deterministic
+heuristic score tagged `source="heuristic"` instead of a hardcoded 74% dressed up
+as an AI verdict — the UI shows that distinction to the user.
 """
 import os
 import json
-from typing import Dict, Any, List
+from typing import Any, Dict, List, Optional, Type, TypeVar
+
+from pydantic import BaseModel, Field, ValidationError, field_validator
 from emergentintegrations.llm.chat import LlmChat, UserMessage, TextDelta, StreamDone
+from compatibility import extract_json, heuristic_compatibility
 from dotenv import load_dotenv
 
 load_dotenv()
 
 EMERGENT_LLM_KEY = os.getenv("EMERGENT_LLM_KEY")
+LLM_MODEL = os.getenv("LLM_MODEL", "claude-sonnet-4-6")
+
+TModel = TypeVar("TModel", bound=BaseModel)
+
+
+# ===== Schemas the model must conform to =====
+
+class CompatibilityPayload(BaseModel):
+    """The six dimensions Claude is asked to score, plus its explanation."""
+    skills_score: float
+    vision_score: float
+    availability_score: float
+    personality_score: float
+    objectives_score: float
+    work_style_score: float
+    overall_score: float
+    explanation: str
+
+    @field_validator(
+        "skills_score", "vision_score", "availability_score",
+        "personality_score", "objectives_score", "work_style_score",
+        "overall_score",
+        mode="after",
+    )
+    @classmethod
+    def clamp(cls, value: float) -> float:
+        """A model that answers 0-10 or 120 shouldn't corrupt the UI."""
+        return max(0.0, min(100.0, float(value)))
+
+
+class BusinessIdea(BaseModel):
+    title: str
+    description: str
+    reasoning: str
+
+
+class BusinessIdeasPayload(BaseModel):
+    ideas: List[BusinessIdea] = Field(default_factory=list)
+
+
+class RoadmapPhase(BaseModel):
+    name: str
+    duration_days: int = 30
+    tasks: List[str] = Field(default_factory=list)
+    milestones: List[str] = Field(default_factory=list)
+
+
+class RoadmapPayload(BaseModel):
+    phases: List[RoadmapPhase] = Field(default_factory=list)
+    key_metrics: List[str] = Field(default_factory=list)
 
 
 class AIService:
     """AI Service for compatibility and business assistance"""
-    
+
     def __init__(self):
         self.api_key = EMERGENT_LLM_KEY
-    
+
+    @property
+    def available(self) -> bool:
+        """False when no LLM key is configured — callers use heuristics instead."""
+        return bool(self.api_key)
+
+    async def _stream_text(self, session_id: str, system_message: str, prompt: str) -> str:
+        chat = LlmChat(
+            api_key=self.api_key,
+            session_id=session_id,
+            system_message=system_message,
+        ).with_model("anthropic", LLM_MODEL)
+
+        response_text = ""
+        async for event in chat.stream_message(UserMessage(text=prompt)):
+            if isinstance(event, TextDelta):
+                response_text += event.content
+            elif isinstance(event, StreamDone):
+                break
+        return response_text
+
+    async def _ask_json(
+        self,
+        session_id: str,
+        system_message: str,
+        prompt: str,
+        schema: Type[TModel],
+        wrap_list_as: Optional[str] = None,
+        attempts: int = 2,
+    ) -> Optional[TModel]:
+        """
+        Ask the model for JSON and validate it. Returns None if every attempt
+        fails, letting the caller fall back to a deterministic result.
+
+        `wrap_list_as` lets a schema with a single list field accept a bare JSON
+        array, which is what the model returns for "give me a list of ideas".
+        """
+        if not self.available:
+            return None
+
+        last_error: Optional[Exception] = None
+        for attempt in range(attempts):
+            try:
+                raw = await self._stream_text(session_id, system_message, prompt)
+                payload = extract_json(raw)
+                if wrap_list_as and isinstance(payload, list):
+                    payload = {wrap_list_as: payload}
+                return schema.model_validate(payload)
+            except (ValueError, ValidationError, json.JSONDecodeError) as e:
+                # Malformed output: worth one more shot, the model is stochastic.
+                last_error = e
+            except Exception as e:
+                # Transport/auth failure: retrying won't help.
+                print(f"[ai] {session_id} call failed: {e}")
+                return None
+
+        print(f"[ai] {session_id} returned unusable JSON after {attempts} attempts: {last_error}")
+        return None
+
+    # ===== Compatibility =====
+
     async def calculate_compatibility(
         self,
         user1: Dict[str, Any],
-        user2: Dict[str, Any]
+        user2: Dict[str, Any],
     ) -> Dict[str, Any]:
         """
-        Calculate compatibility score between two users using Claude
-        Returns detailed breakdown and explanation
+        Score compatibility between two users across six dimensions.
+
+        The returned dict carries a `source` field: "ai" when Claude produced the
+        analysis, "heuristic" when it was computed locally from profile overlap.
         """
-        profile1 = user1.get("profile", {})
-        profile2 = user2.get("profile", {})
-        
-        # Create prompt for Claude
+        profile1 = user1.get("profile", {}) or {}
+        profile2 = user2.get("profile", {}) or {}
+
         prompt = f"""
 You are an expert business matchmaker. Analyze the compatibility between these two entrepreneurs.
 
@@ -55,8 +175,8 @@ Person 2:
 - Budget: {profile2.get('budget')}
 
 Provide a compatibility analysis with scores (0-100) for:
-1. Skills Compatibility (complementary skills are better)
-2. Vision Alignment (similar objectives)
+1. Skills Compatibility (complementary skills are better than identical ones)
+2. Vision Alignment (similar long-term intent and values)
 3. Availability Match
 4. Personality/Work Style Compatibility
 5. Objectives Alignment
@@ -74,66 +194,39 @@ Return ONLY a JSON object with this exact structure (no markdown, no extra text)
   "explanation": "<2-3 sentence explanation of why they're compatible>"
 }}
 """
-        
-        try:
-            # Initialize Claude chat
-            chat = LlmChat(
-                api_key=self.api_key,
-                session_id="compatibility-analysis",
-                system_message="You are a business matchmaking expert. Always respond with valid JSON only."
-            ).with_model("anthropic", "claude-sonnet-4-6")
-            
-            # Get response
-            user_message = UserMessage(text=prompt)
-            response_text = ""
-            
-            async for event in chat.stream_message(user_message):
-                if isinstance(event, TextDelta):
-                    response_text += event.content
-                elif isinstance(event, StreamDone):
-                    break
-            
-            # Parse JSON response
-            # Remove markdown code blocks if present
-            response_text = response_text.strip()
-            if response_text.startswith("```"):
-                # Extract JSON from markdown
-                lines = response_text.split("\n")
-                response_text = "\n".join(lines[1:-1])
-            
-            result = json.loads(response_text)
-            return result
-            
-        except Exception as e:
-            print(f"Error calculating compatibility: {e}")
-            # Return default scores if AI fails
-            return {
-                "skills_score": 75.0,
-                "vision_score": 75.0,
-                "availability_score": 80.0,
-                "personality_score": 70.0,
-                "objectives_score": 75.0,
-                "work_style_score": 70.0,
-                "overall_score": 74.0,
-                "explanation": "Potential compatibility based on complementary skills and shared entrepreneurial goals."
-            }
-    
+
+        result = await self._ask_json(
+            session_id="compatibility-analysis",
+            system_message="You are a business matchmaking expert. Always respond with valid JSON only.",
+            prompt=prompt,
+            schema=CompatibilityPayload,
+        )
+
+        if result is not None:
+            return {**result.model_dump(), "source": "ai"}
+
+        return heuristic_compatibility(profile1, profile2)
+
+    # ===== Business ideas =====
+
     async def generate_business_ideas(
         self,
         user1_profile: Dict[str, Any],
         user2_profile: Dict[str, Any],
-        count: int = 5
+        count: int = 5,
     ) -> List[Dict[str, str]]:
-        """
-        Generate business ideas for a matched pair
-        """
+        """Generate business ideas for a matched pair."""
+        shared_objectives = set(
+            (user1_profile.get('objectives') or []) + (user2_profile.get('objectives') or [])
+        )
+
         prompt = f"""
 Based on these two entrepreneurs' profiles, suggest {count} specific business ideas they could build together.
 
 Person 1: {user1_profile.get('profession')} with skills in {', '.join(user1_profile.get('skills', []))}
 Person 2: {user2_profile.get('profession')} with skills in {', '.join(user2_profile.get('skills', []))}
 
-Shared objectives: {', '.join(set(user1_profile.get('objectives', []) + user2_profile.get('objectives', [])))}
+Shared objectives: {', '.join(shared_objectives)}
 Combined budget: {user1_profile.get('budget')} + {user2_profile.get('budget')}
 
 Return ONLY a JSON array with this structure (no markdown):
@@ -145,52 +238,30 @@ Return ONLY a JSON array with this structure (no markdown):
   }}
 ]
 """
-        
-        try:
-            chat = LlmChat(
-                api_key=self.api_key,
-                session_id="business-ideas",
-                system_message="You are a startup advisor. Always respond with valid JSON only."
-            ).with_model("anthropic", "claude-sonnet-4-6")
-            
-            user_message = UserMessage(text=prompt)
-            response_text = ""
-            
-            async for event in chat.stream_message(user_message):
-                if isinstance(event, TextDelta):
-                    response_text += event.content
-                elif isinstance(event, StreamDone):
-                    break
-            
-            # Clean and parse
-            response_text = response_text.strip()
-            if response_text.startswith("```"):
-                lines = response_text.split("\n")
-                response_text = "\n".join(lines[1:-1])
-            
-            result = json.loads(response_text)
-            return result
-            
-        except Exception as e:
-            print(f"Error generating ideas: {e}")
-            return [
-                {
-                    "title": "SaaS Platform",
-                    "description": "Build a subscription-based software service.",
-                    "reasoning": "Leverages technical and business skills."
-                }
-            ]
-    
+
+        result = await self._ask_json(
+            session_id="business-ideas",
+            system_message="You are a startup advisor. Always respond with valid JSON only.",
+            prompt=prompt,
+            schema=BusinessIdeasPayload,
+            wrap_list_as="ideas",
+        )
+
+        if result is not None and result.ideas:
+            return [idea.model_dump() for idea in result.ideas]
+
+        return []
+
+    # ===== Roadmap =====
+
     async def generate_roadmap(
         self,
         project_name: str,
         vision: str,
         participants_skills: List[str],
-        duration_days: int = 90
+        duration_days: int = 90,
     ) -> Dict[str, Any]:
-        """
-        Generate a roadmap for a project
-        """
+        """Generate a roadmap for a project."""
         prompt = f"""
 Create a {duration_days}-day roadmap for this startup project:
 
@@ -211,55 +282,26 @@ Return ONLY a JSON object with this structure (no markdown):
   "key_metrics": ["<metric 1>", "<metric 2>"]
 }}
 """
-        
-        try:
-            chat = LlmChat(
-                api_key=self.api_key,
-                session_id="roadmap-gen",
-                system_message="You are a product strategist. Always respond with valid JSON only."
-            ).with_model("anthropic", "claude-sonnet-4-6")
-            
-            user_message = UserMessage(text=prompt)
-            response_text = ""
-            
-            async for event in chat.stream_message(user_message):
-                if isinstance(event, TextDelta):
-                    response_text += event.content
-                elif isinstance(event, StreamDone):
-                    break
-            
-            response_text = response_text.strip()
-            if response_text.startswith("```"):
-                lines = response_text.split("\n")
-                response_text = "\n".join(lines[1:-1])
-            
-            result = json.loads(response_text)
-            return result
-            
-        except Exception as e:
-            print(f"Error generating roadmap: {e}")
-            return {
-                "phases": [
-                    {
-                        "name": "Planning",
-                        "duration_days": 30,
-                        "tasks": ["Define MVP", "Create wireframes"],
-                        "milestones": ["MVP spec complete"]
-                    }
-                ],
-                "key_metrics": ["User signups", "Revenue"]
-            }
-    
+
+        result = await self._ask_json(
+            session_id="roadmap-gen",
+            system_message="You are a product strategist. Always respond with valid JSON only.",
+            prompt=prompt,
+            schema=RoadmapPayload,
+        )
+
+        if result is not None and result.phases:
+            return {**result.model_dump(), "source": "ai"}
+
+        return {"phases": [], "key_metrics": [], "source": "unavailable"}
+
     async def ai_assistant_chat(
         self,
         session_id: str,
         message: str,
-        context: Dict[str, Any]
-    ) -> str:
-        """
-        AI assistant for business questions and guidance
-        Streams response
-        """
+        context: Dict[str, Any],
+    ):
+        """AI assistant for business questions and guidance. Returns a stream."""
         system_message = f"""
 You are an AI business cofounder assistant helping entrepreneurs build their startup.
 
@@ -270,17 +312,13 @@ Context:
 
 Provide actionable, specific advice.
 """
-        
         chat = LlmChat(
             api_key=self.api_key,
             session_id=f"assistant-{session_id}",
-            system_message=system_message
-        ).with_model("anthropic", "claude-sonnet-4-6")
-        
-        user_message = UserMessage(text=message)
-        
-        # Return generator for streaming
-        return chat.stream_message(user_message)
+            system_message=system_message,
+        ).with_model("anthropic", LLM_MODEL)
+
+        return chat.stream_message(UserMessage(text=message))
 
 
 # Global AI service instance

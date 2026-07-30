@@ -112,7 +112,7 @@ export default function PremiumSuccessScreen() {
                 <Sparkles size={12} color={theme.colors.brandOn} strokeWidth={2.5} fill={theme.colors.brandOn} />
                 <Text style={styles.ribbonText}>PREMIUM ACTIVE</Text>
               </View>
-              <Text style={styles.title}>You're all set</Text>
+              <Text style={styles.title}>You&apos;re all set</Text>
               <Text style={styles.subtitle}>
                 Enjoy unlimited swipes, deep AI insights, priority visibility, and your premium badge.
               </Text>

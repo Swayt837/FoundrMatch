@@ -11,11 +11,14 @@ import {
   Image,
   ActivityIndicator,
   RefreshControl,
+  Alert,
+  Platform,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { Zap, Heart, ChevronRight, Rocket, Info } from 'lucide-react-native';
+import { Zap, Heart, ChevronRight, Rocket, Info, Sparkles, UserMinus } from 'lucide-react-native';
 import { api } from '@/src/api/client';
+import { useSocketEvent } from '@/src/hooks/use-socket-event';
 import { theme } from '@/src/theme';
 
 const PLACEHOLDER = 'https://images.unsplash.com/photo-1642290687545-8ab7e6002472?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA3MDR8MHwxfHNlYXJjaHwyfHxwcmVtaXVtJTIwcG9ydHJhaXQlMjBibGFjayUyMGFuZCUyMHdoaXRlfGVufDB8fHx8MTc4NTMyNzI2MXww&ixlib=rb-4.1.0&q=85';
@@ -27,21 +30,24 @@ export default function MatchesScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
+  const totalUnread = matches.reduce((sum, m) => sum + (m.unread_count || 0), 0);
+
   useFocusEffect(
     useCallback(() => {
       loadMatches();
     }, [])
   );
 
-  const loadMatches = async () => {
-    setLoading(true);
+  /** `silent` refreshes in place, for socket-driven updates. */
+  const loadMatches = async (silent: boolean = false) => {
+    if (!silent) setLoading(true);
     try {
       const response = await api.getMatches();
       setMatches(response.matches || []);
     } catch (error) {
       console.error('Load matches error:', error);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -51,6 +57,16 @@ export default function MatchesScreen() {
     setRefreshing(false);
   };
 
+  // Keep the list live: a new message, match or unmatch arrives over the socket
+  // rather than waiting for the user to pull to refresh.
+  useSocketEvent('message_notification', () => loadMatches(true));
+  useSocketEvent('new_match', () => loadMatches(true));
+  useSocketEvent('match_removed', (data: { match_id?: string }) => {
+    if (data?.match_id) {
+      setMatches((prev) => prev.filter((m) => m.match_id !== data.match_id));
+    }
+  });
+
   const goToChat = (matchId: string) => {
     router.push(`/chat/${matchId}`);
   };
@@ -59,11 +75,39 @@ export default function MatchesScreen() {
     router.push(`/profile/${userId}`);
   };
 
+  const confirmUnmatch = (item: any) => {
+    const name = item.user?.profile?.name || 'this founder';
+    const question = `Unmatch ${name}? This deletes the conversation and deal room for both of you.`;
+
+    const run = async () => {
+      try {
+        await api.unmatch(item.match_id);
+        setMatches((prev) => prev.filter((m) => m.match_id !== item.match_id));
+      } catch (e: any) {
+        const message = e?.detail || e?.message || 'Could not unmatch';
+        if (Platform.OS === 'web') window.alert(message);
+        else Alert.alert('Unmatch failed', message);
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      if (window.confirm(question)) run();
+      return;
+    }
+    Alert.alert('Unmatch', question, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Unmatch', style: 'destructive', onPress: run },
+    ]);
+  };
+
   const renderMatch = ({ item }: { item: any }) => {
     const user = item.user;
     const profile = user.profile;
     const compat = item.compatibility;
     const compatScore = Math.round(compat?.overall_score || 0);
+    const unread = item.unread_count || 0;
+    // A heuristic score is an estimate, not an AI verdict — label it as such.
+    const isEstimate = compat?.source && compat.source !== 'ai';
 
     return (
       <View style={styles.rowContainer}>
@@ -82,23 +126,42 @@ export default function MatchesScreen() {
               source={{ uri: profile.photos?.[0] || PLACEHOLDER }}
               style={styles.avatar}
             />
+            {unread > 0 && (
+              <View style={styles.unreadDot} testID={`match-unread-${item.match_id}`}>
+                <Text style={styles.unreadDotText}>{unread > 9 ? '9+' : unread}</Text>
+              </View>
+            )}
           </TouchableOpacity>
           <View style={styles.rowContent}>
             <View style={styles.rowTop}>
               <Text style={styles.rowName} numberOfLines={1}>{profile.name}</Text>
-              <View style={styles.compatBadge}>
+              {user.premium && (
+                <View style={styles.premiumPill} testID={`match-premium-${item.match_id}`}>
+                  <Sparkles size={9} color={theme.colors.brandOn} strokeWidth={2.5} fill={theme.colors.brandOn} />
+                  <Text style={styles.premiumPillText}>PRO</Text>
+                </View>
+              )}
+              <View style={[styles.compatBadge, isEstimate && styles.compatBadgeEstimate]}>
                 <Zap size={10} color={theme.colors.brand} strokeWidth={2} fill={theme.colors.brand} />
-                <Text style={styles.compatText}>{compatScore}%</Text>
+                <Text style={styles.compatText}>{compatScore}%{isEstimate ? ' est.' : ''}</Text>
               </View>
             </View>
             <Text style={styles.rowMeta} numberOfLines={1}>
               {profile.profession?.replace(/_/g, ' ')} · {profile.city}
             </Text>
-            {compat?.explanation && (
+            {item.last_message ? (
+              <Text
+                style={[styles.rowExplain, unread > 0 && styles.rowExplainUnread]}
+                numberOfLines={1}
+              >
+                {item.last_message.sender_id === user.user_id ? '' : 'You: '}
+                {item.last_message.content}
+              </Text>
+            ) : compat?.explanation ? (
               <Text style={styles.rowExplain} numberOfLines={1}>
                 {compat.explanation}
               </Text>
-            )}
+            ) : null}
           </View>
           <ChevronRight size={18} color={theme.colors.textSecondary} strokeWidth={1.5} />
         </TouchableOpacity>
@@ -118,6 +181,14 @@ export default function MatchesScreen() {
           >
             <Rocket size={14} color={theme.colors.brand} strokeWidth={1.75} />
             <Text style={styles.dealRoomIconText}>Deal Room</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.matchActionBtn}
+            onPress={() => confirmUnmatch(item)}
+            testID={`match-unmatch-${item.match_id}`}
+          >
+            <UserMinus size={13} color={theme.colors.errorOn} strokeWidth={1.75} />
+            <Text style={[styles.matchActionText, { color: theme.colors.errorOn }]}>Unmatch</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -143,7 +214,10 @@ export default function MatchesScreen() {
       <View style={styles.header}>
         <Text style={styles.eyebrow}>YOUR CONNECTIONS</Text>
         <Text style={styles.title}>Matches</Text>
-        <Text style={styles.subtitle}>{matches.length} {matches.length === 1 ? 'partner' : 'partners'}</Text>
+        <Text style={styles.subtitle}>
+          {matches.length} {matches.length === 1 ? 'partner' : 'partners'}
+          {totalUnread > 0 ? ` · ${totalUnread} unread` : ''}
+        </Text>
       </View>
 
       {matches.length === 0 ? (
@@ -240,6 +314,8 @@ const styles = StyleSheet.create({
   matchActions: {
     flexDirection: 'row',
     alignItems: 'center',
+    // Wraps so a third action doesn't overflow on narrow screens
+    flexWrap: 'wrap',
     gap: theme.spacing.sm,
     marginLeft: 52 + theme.spacing.md,
   },
@@ -253,6 +329,49 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.surfaceTertiary,
     borderWidth: 1,
     borderColor: theme.colors.border,
+  },
+  unreadDot: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    minWidth: 20,
+    height: 20,
+    paddingHorizontal: 5,
+    borderRadius: 10,
+    backgroundColor: theme.colors.brand,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: theme.colors.surface,
+  },
+  unreadDotText: {
+    ...theme.typography.caption,
+    fontSize: 10,
+    fontWeight: '700',
+    color: theme.colors.brandOn,
+  },
+  premiumPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: theme.radius.pill,
+    backgroundColor: theme.colors.brand,
+  },
+  premiumPillText: {
+    ...theme.typography.caption,
+    fontSize: 9,
+    fontWeight: '700',
+    color: theme.colors.brandOn,
+    letterSpacing: 0.4,
+  },
+  compatBadgeEstimate: {
+    opacity: 0.7,
+  },
+  rowExplainUnread: {
+    color: theme.colors.text,
+    fontWeight: '600',
   },
   matchActionText: {
     ...theme.typography.caption,

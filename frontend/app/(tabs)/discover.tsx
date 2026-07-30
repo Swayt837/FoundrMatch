@@ -23,7 +23,7 @@ import { useRouter } from 'expo-router';
 import { X, Heart, Zap, MapPin, Briefcase, Clock, Sparkles, Info, SlidersHorizontal, Check } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { useAuth } from '@/src/contexts/AuthContext';
-import { api } from '@/src/api/client';
+import { api, ApiError } from '@/src/api/client';
 import { theme } from '@/src/theme';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = { width: 390, height: 844 };
@@ -78,6 +78,7 @@ export default function DiscoverScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [swipeLimitError, setSwipeLimitError] = useState(false);
+  const [swipeError, setSwipeError] = useState<string | null>(null);
   const [matchModal, setMatchModal] = useState<MatchModal>({ visible: false, user: null, compatibility: null, matchId: '' });
   const [filters, setFilters] = useState<DiscoverFilters>({});
   const [showFilters, setShowFilters] = useState(false);
@@ -110,10 +111,18 @@ export default function DiscoverScreen() {
       setCurrentIndex(0);
     } catch (err: any) {
       console.error('Load cards error:', err);
-      setError(err?.message || 'Failed to load profiles');
+      setError(err?.detail || err?.message || 'Failed to load profiles');
     } finally {
       setLoading(false);
     }
+  };
+
+  const rewindCard = () => {
+    Animated.spring(position, {
+      toValue: { x: 0, y: 0 },
+      friction: 8,
+      useNativeDriver: false,
+    }).start();
   };
 
   const handleSwipe = async (direction: 'left' | 'right') => {
@@ -121,10 +130,10 @@ export default function DiscoverScreen() {
 
     const card = cards[currentIndex];
     haptic(direction === 'right' ? 'medium' : 'light');
-    
+
     try {
       const response = await api.swipe(card.user.user_id, direction);
-      
+
       if (response.matched) {
         haptic('success');
         setMatchModal({
@@ -135,20 +144,29 @@ export default function DiscoverScreen() {
         });
       }
     } catch (error: any) {
-      console.error('Swipe error:', error);
-      // Detect the 402 daily-limit error from backend
-      if (error?.message?.toLowerCase().includes('daily swipe limit')) {
+      // Branch on the HTTP status carried by ApiError rather than matching the
+      // detail text, which changes whenever the server message is reworded.
+      if (error instanceof ApiError && error.isPaymentRequired) {
         setSwipeLimitError(true);
-        // Rewind card position
-        Animated.spring(position, {
-          toValue: { x: 0, y: 0 },
-          friction: 8,
-          useNativeDriver: false,
-        }).start();
+        rewindCard();
         return;
       }
+
+      if (error instanceof ApiError && error.isRateLimited) {
+        setSwipeError('You are going a bit fast — try again in a moment.');
+        rewindCard();
+        return;
+      }
+
+      // Anything else (already swiped, network failure) used to be swallowed and
+      // the card advanced as though the swipe had been recorded.
+      console.error('Swipe error:', error);
+      setSwipeError(error?.detail || error?.message || 'Swipe failed. Please try again.');
+      rewindCard();
+      return;
     }
 
+    setSwipeError(null);
     setCurrentIndex(prev => prev + 1);
     position.setValue({ x: 0, y: 0 });
   };
@@ -227,7 +245,7 @@ export default function DiscoverScreen() {
           <View style={styles.emptyIconWrap}>
             <Info size={32} color={theme.colors.brand} strokeWidth={1.5} />
           </View>
-          <Text style={styles.emptyTitle}>Couldn't load profiles</Text>
+          <Text style={styles.emptyTitle}>Couldn&apos;t load profiles</Text>
           <Text style={styles.emptyText}>
             Something went wrong. Give it another try.
           </Text>
@@ -249,9 +267,9 @@ export default function DiscoverScreen() {
           <View style={styles.emptyIconWrap}>
             <Sparkles size={32} color={theme.colors.brand} strokeWidth={1.5} />
           </View>
-          <Text style={styles.emptyTitle}>You're all caught up</Text>
+          <Text style={styles.emptyTitle}>You&apos;re all caught up</Text>
           <Text style={styles.emptyText}>
-            No new founders right now. We'll notify you when we curate more matches for you.
+            No new founders right now. We&apos;ll notify you when we curate more matches for you.
           </Text>
           <TouchableOpacity style={styles.reloadButton} onPress={loadCards} testID="discover-reload">
             <Text style={styles.reloadButtonText}>Refresh</Text>
@@ -360,15 +378,27 @@ export default function DiscoverScreen() {
             style={styles.gradient}
           />
 
-          {/* Compatibility badge - top */}
+          {/* Compatibility badge - top. "est." marks a locally computed score,
+              so an AI outage never masquerades as a real AI verdict. */}
           <View style={styles.compatBadge}>
             <BlurView intensity={40} tint="dark" style={styles.compatBadgeBlur}>
               <View style={styles.compatBadgeInner}>
                 <Zap size={12} color={theme.colors.brand} strokeWidth={2} fill={theme.colors.brand} />
-                <Text style={styles.compatBadgeText}>{Math.round(compatibility.overall_score)}% match</Text>
+                <Text style={styles.compatBadgeText}>
+                  {Math.round(compatibility.overall_score)}% match
+                  {compatibility.source && compatibility.source !== 'ai' ? ' (est.)' : ''}
+                </Text>
               </View>
             </BlurView>
           </View>
+
+          {/* Premium badge — visible to other founders, which is the point of it */}
+          {cardUser.premium && (
+            <View style={styles.premiumCardBadge} testID="discover-premium-badge">
+              <Sparkles size={11} color={theme.colors.brandOn} strokeWidth={2.5} fill={theme.colors.brandOn} />
+              <Text style={styles.premiumCardBadgeText}>PREMIUM</Text>
+            </View>
+          )}
 
           {/* Swipe indicators */}
           <Animated.View style={[styles.likeOverlay, { opacity: likeOpacity }]}>
@@ -462,7 +492,7 @@ export default function DiscoverScreen() {
         <View style={styles.matchOverlay} testID="match-modal">
           <BlurView intensity={95} tint="dark" style={StyleSheet.absoluteFillObject} />
           <View style={styles.matchContent}>
-            <Text style={styles.matchEyebrow}>IT'S A MATCH</Text>
+            <Text style={styles.matchEyebrow}>IT&apos;S A MATCH</Text>
             <Text style={styles.matchTitle}>You & {matchModal.user.profile.name}</Text>
             <View style={styles.matchAvatars}>
               <Image
@@ -498,6 +528,17 @@ export default function DiscoverScreen() {
         </View>
       )}
 
+      {/* Swipe failure feedback — previously only logged to the console */}
+      {swipeError && (
+        <TouchableOpacity
+          style={styles.swipeErrorBanner}
+          onPress={() => setSwipeError(null)}
+          testID="discover-swipe-error"
+        >
+          <Text style={styles.swipeErrorText}>{swipeError}</Text>
+        </TouchableOpacity>
+      )}
+
       {/* Filter modal */}
       <DiscoverFilterModal
         visible={showFilters}
@@ -517,7 +558,7 @@ export default function DiscoverScreen() {
             <Text style={styles.matchEyebrow}>DAILY LIMIT REACHED</Text>
             <Text style={styles.matchTitle}>Out of swipes</Text>
             <Text style={styles.matchDesc}>
-              You've hit today's free limit. Upgrade to Premium for unlimited swipes and priority visibility.
+              You&apos;ve hit today&apos;s free limit. Upgrade to Premium for unlimited swipes and priority visibility.
             </Text>
             <TouchableOpacity
               style={styles.matchCta}
@@ -814,6 +855,43 @@ const styles = StyleSheet.create({
     right: theme.spacing.lg,
     borderRadius: theme.radius.pill,
     overflow: 'hidden',
+  },
+  premiumCardBadge: {
+    position: 'absolute',
+    top: theme.spacing.lg + 38,
+    right: theme.spacing.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: theme.radius.pill,
+    backgroundColor: theme.colors.brand,
+    ...theme.shadow.goldGlow,
+  },
+  premiumCardBadgeText: {
+    ...theme.typography.caption,
+    fontSize: 10,
+    fontWeight: '700',
+    color: theme.colors.brandOn,
+    letterSpacing: 0.5,
+  },
+  swipeErrorBanner: {
+    position: 'absolute',
+    left: theme.spacing.xl,
+    right: theme.spacing.xl,
+    bottom: 120,
+    paddingVertical: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.md,
+    borderRadius: theme.radius.sm,
+    backgroundColor: 'rgba(239,68,68,0.15)',
+    borderWidth: 1,
+    borderColor: theme.colors.errorOn,
+  },
+  swipeErrorText: {
+    ...theme.typography.footnote,
+    color: theme.colors.errorOn,
+    textAlign: 'center',
   },
   viewProfileBtn: {
     position: 'absolute',

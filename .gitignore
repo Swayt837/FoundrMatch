@@ -83,6 +83,9 @@ android-sdk/
 .env
 .env.*
 *.env
+# ...but the templates document required configuration and must be committed
+!.env.example
+!**/.env.example
 credentials.json
 *.key
 .credentials

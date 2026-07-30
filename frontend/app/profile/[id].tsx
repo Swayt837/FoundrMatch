@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   useWindowDimensions,
   Platform,
+  Alert,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -30,6 +31,7 @@ import {
   Users,
   DollarSign,
   Award,
+  Flag,
   Languages as LanguagesIcon,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
@@ -59,15 +61,56 @@ export default function ProfileDetailScreen() {
     setError(null);
     try {
       const data = await api.getUserProfile(id as string);
-      // Backend returns { user_id, email, profile: {name, bio, city, ...}, ... }
-      // Flatten profile fields to top level for easier rendering
-      const flat = data?.profile ? { user_id: data.user_id, ...data.profile } : data;
+      // Backend returns { user_id, profile: {name, bio, city, ...}, premium, ... }
+      // Flatten profile fields to top level for easier rendering, keeping the
+      // root-level fields the UI needs (premium drives the badge).
+      const flat = data?.profile
+        ? { user_id: data.user_id, premium: data.premium, ...data.profile }
+        : data;
       setProfile(flat);
     } catch (err: any) {
-      setError(err?.message || 'Failed to load profile');
+      setError(err?.detail || err?.message || 'Failed to load profile');
     } finally {
       setLoading(false);
     }
+  };
+
+  const reportOrBlock = () => {
+    const name = profile?.name || 'this founder';
+
+    const block = async () => {
+      try {
+        await api.blockUser(id as string);
+        router.back();
+      } catch (e: any) {
+        setError(e?.detail || e?.message || 'Could not block');
+      }
+    };
+
+    const report = async () => {
+      try {
+        await api.reportUser(id as string, 'inappropriate_content', '', true);
+        router.back();
+      } catch (e: any) {
+        setError(e?.detail || e?.message || 'Could not report');
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      const choice = window.prompt(
+        `Type "block" to block ${name}, or "report" to report and block them.`,
+        ''
+      );
+      if (choice?.trim().toLowerCase() === 'block') block();
+      if (choice?.trim().toLowerCase() === 'report') report();
+      return;
+    }
+
+    Alert.alert(name, 'Blocking removes your match and conversation for both of you.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Block', style: 'destructive', onPress: block },
+      { text: 'Report & block', style: 'destructive', onPress: report },
+    ]);
   };
 
   const haptic = () => {
@@ -108,7 +151,7 @@ export default function ProfileDetailScreen() {
       <View style={styles.container} testID="profile-detail-error">
         {headerBack}
         <SafeAreaView style={styles.centered} edges={['top']}>
-          <Text style={styles.errorTitle}>Couldn't load profile</Text>
+          <Text style={styles.errorTitle}>Couldn&apos;t load profile</Text>
           <Text style={styles.errorText}>{error || 'Profile not found'}</Text>
           <TouchableOpacity style={styles.retryButton} onPress={load}>
             <Text style={styles.retryText}>Try again</Text>
@@ -170,6 +213,17 @@ export default function ProfileDetailScreen() {
                 {profile.name}
               </Text>
               {profile.age && <Text style={styles.heroAge}>{profile.age}</Text>}
+              {profile.premium && (
+                <View style={styles.premiumBadge} testID="profile-detail-premium">
+                  <Sparkles
+                    size={11}
+                    color={theme.colors.brandOn}
+                    strokeWidth={2.5}
+                    fill={theme.colors.brandOn}
+                  />
+                  <Text style={styles.premiumBadgeText}>PREMIUM</Text>
+                </View>
+              )}
             </View>
             {(profile.city || profile.country) && (
               <View style={styles.heroMeta}>
@@ -294,6 +348,17 @@ export default function ProfileDetailScreen() {
             </Section>
           )}
 
+          {/* Safety actions — required for store review, and the only way for a
+              user to get someone off their feed. */}
+          <TouchableOpacity
+            style={styles.reportRow}
+            onPress={reportOrBlock}
+            testID="profile-detail-report"
+          >
+            <Flag size={14} color={theme.colors.errorOn} strokeWidth={1.75} />
+            <Text style={styles.reportText}>Block or report</Text>
+          </TouchableOpacity>
+
           {/* Verified footer stub */}
           <View style={styles.footer}>
             <Globe size={12} color={theme.colors.textSecondary} strokeWidth={1.5} />
@@ -416,6 +481,35 @@ const styles = StyleSheet.create({
     zIndex: 2,
   },
   nameRow: { flexDirection: 'row', alignItems: 'baseline', gap: theme.spacing.sm, flexWrap: 'wrap' },
+  premiumBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: theme.radius.pill,
+    backgroundColor: theme.colors.brand,
+    ...theme.shadow.goldGlow,
+  },
+  premiumBadgeText: {
+    ...theme.typography.caption,
+    fontSize: 10,
+    fontWeight: '700',
+    color: theme.colors.brandOn,
+    letterSpacing: 0.5,
+  },
+  reportRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: theme.spacing.sm,
+    marginTop: theme.spacing.xl,
+    paddingVertical: 12,
+    borderRadius: theme.radius.pill,
+    borderWidth: 1,
+    borderColor: 'rgba(253,164,175,0.3)',
+  },
+  reportText: { ...theme.typography.subhead, color: theme.colors.errorOn },
   heroName: {
     ...theme.typography.display,
     color: theme.colors.text,

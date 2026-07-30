@@ -25,6 +25,9 @@ projects_collection = db.projects
 user_sessions_collection = db.user_sessions
 notifications_collection = db.notifications
 payment_transactions_collection = db.payment_transactions
+blocks_collection = db.blocks
+reports_collection = db.reports
+compatibility_cache_collection = db.compatibility_cache
 
 
 async def create_indexes():
@@ -67,6 +70,48 @@ async def create_indexes():
     # Deal Rooms indexes
     await deal_rooms_collection.create_index([("match_id", 1)])
     await deal_rooms_collection.create_index([("participants", 1)])
+
+    # Moderation indexes
+    await blocks_collection.create_index(
+        [("blocker_id", 1), ("blocked_id", 1)], unique=True
+    )
+    await blocks_collection.create_index([("blocked_id", 1)])
+    await reports_collection.create_index([("reported_id", 1), ("created_at", -1)])
+    await reports_collection.create_index([("reporter_id", 1)])
+
+    # Compatibility cache: expire entries so profile edits eventually take effect
+    # even when the targeted invalidation misses. Not declared unique — creating a
+    # unique index would abort startup if any legacy duplicate exists, and the
+    # upsert-by-pair_key write path already keeps entries unique.
+    await compatibility_cache_collection.create_index("pair_key")
+    await compatibility_cache_collection.create_index(
+        "created_at", expireAfterSeconds=60 * 60 * 24 * 30
+    )
+
+
+async def run_migrations():
+    """
+    Idempotent data fixes applied at startup.
+
+    Kept small and safe to re-run: this is not a migration framework, just a way
+    to stop old documents from carrying fields the code no longer reads.
+    """
+    # `premium` moved to the document root; the copy under `settings` was never
+    # updated after a purchase, so anything still reading it saw every user as free.
+    result = await users_collection.update_many(
+        {"settings.premium": {"$exists": True}},
+        {"$unset": {"settings.premium": ""}},
+    )
+    if result.modified_count:
+        print(f"✅ Migration: removed stale settings.premium from {result.modified_count} user(s)")
+
+    # Ensure the root flag exists so queries on it behave predictably.
+    result = await users_collection.update_many(
+        {"premium": {"$exists": False}},
+        {"$set": {"premium": False}},
+    )
+    if result.modified_count:
+        print(f"✅ Migration: initialised premium=false on {result.modified_count} user(s)")
 
 
 async def generate_user_id() -> str:

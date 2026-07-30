@@ -88,7 +88,7 @@ export default function AssistantScreen() {
               </View>
               <Text style={styles.welcomeTitle}>How can I help{'\n'}you today?</Text>
               <Text style={styles.welcomeText}>
-                I'm your AI cofounder, powered by Claude. Ask me anything about building your startup.
+                I&apos;m your AI cofounder, powered by Claude. Ask me anything about building your startup.
               </Text>
               <View style={styles.promptsList}>
                 {PROMPTS.map((p, i) => {

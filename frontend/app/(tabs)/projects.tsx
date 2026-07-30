@@ -10,7 +10,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useFocusEffect, useRouter } from 'expo-router';
 import {
   Plus, Briefcase, Clock, TrendingUp, ChevronRight,
-  Filter, X, Check, MapPin,
+  Filter, X, Check, MapPin, Users,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { api } from '@/src/api/client';
@@ -197,6 +197,7 @@ export default function ProjectsScreen() {
                   key={p.project_id}
                   style={styles.card}
                   activeOpacity={0.7}
+                  onPress={() => router.push(`/project/${p.project_id}`)}
                   testID={`project-${p.project_id}`}
                 >
                   <View style={styles.cardTop}>
@@ -223,6 +224,20 @@ export default function ProjectsScreen() {
                       <TrendingUp size={12} color={theme.colors.brand} strokeWidth={1.75} />
                       <Text style={styles.metaTextGold}>{p.equity_percentage}% equity</Text>
                     </View>
+                    <View style={styles.metaChip}>
+                      <Users size={12} color={theme.colors.textSecondary} strokeWidth={1.75} />
+                      <Text style={styles.metaText}>{p.applicants_count ?? 0}</Text>
+                    </View>
+                    {p.is_owner ? (
+                      <View style={styles.ownerChip}>
+                        <Text style={styles.ownerChipText}>Yours</Text>
+                      </View>
+                    ) : p.has_applied ? (
+                      <View style={styles.appliedChip}>
+                        <Check size={11} color={theme.colors.brand} strokeWidth={2.5} />
+                        <Text style={styles.appliedChipText}>Applied</Text>
+                      </View>
+                    ) : null}
                   </View>
 
                   {p.skills_needed?.length > 0 && (
@@ -497,6 +512,23 @@ const styles = StyleSheet.create({
   },
   metaText: { ...theme.typography.caption, color: theme.colors.textSecondary },
   metaTextGold: { ...theme.typography.caption, color: theme.colors.brand, fontWeight: '500' },
+  ownerChip: {
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: 4,
+    borderRadius: theme.radius.pill,
+    backgroundColor: theme.colors.surfaceTertiary,
+  },
+  ownerChipText: { ...theme.typography.caption, color: theme.colors.textSecondary },
+  appliedChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: 4,
+    borderRadius: theme.radius.pill,
+    backgroundColor: theme.colors.brandTertiary,
+  },
+  appliedChipText: { ...theme.typography.caption, color: theme.colors.brand, fontWeight: '500' },
   tagsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: theme.spacing.xs },
   tag: {
     paddingHorizontal: 8, paddingVertical: 3,

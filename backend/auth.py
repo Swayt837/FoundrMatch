@@ -21,11 +21,44 @@ from database import (
 load_dotenv()
 
 # Configuration
-SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-this-in-production")
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
+_DEV_SECRET = "dev-only-insecure-secret"
+SECRET_KEY = os.getenv("SECRET_KEY", "")
+
+if not SECRET_KEY:
+    # Refuse to boot outside development rather than silently signing every token
+    # with a value that is public in the source tree.
+    if ENVIRONMENT != "development":
+        raise RuntimeError(
+            "SECRET_KEY environment variable is required when ENVIRONMENT is not 'development'"
+        )
+    print("⚠️  SECRET_KEY is unset — using an insecure development key")
+    SECRET_KEY = _DEV_SECRET
+
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_DAYS = 7
 
+# bcrypt silently truncates beyond 72 bytes, so passwords are length-checked first
+MIN_PASSWORD_LENGTH = 8
+MAX_PASSWORD_LENGTH = 128
+
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+def validate_password_strength(password: str) -> None:
+    """Reject passwords the client-side hint alone would have let through."""
+    if len(password) < MIN_PASSWORD_LENGTH:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Password must be at least {MIN_PASSWORD_LENGTH} characters",
+        )
+    if len(password) > MAX_PASSWORD_LENGTH:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Password must be at most {MAX_PASSWORD_LENGTH} characters",
+        )
+    if password.lower() in {"password", "12345678", "qwertyui", "iloveyou"}:
+        raise HTTPException(status_code=400, detail="Please choose a less common password")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -188,9 +221,9 @@ async def create_or_get_user_from_google(
         "settings": {
             "notifications_enabled": True,
             "distance_preference": 100,
-            "show_age": True,
-            "premium": False
+            "show_age": True
         },
+        "premium": False,
         "onboarding_completed": False,
         "created_at": get_utc_now(),
         "updated_at": get_utc_now(),

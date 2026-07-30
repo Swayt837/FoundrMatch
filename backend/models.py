@@ -1,8 +1,8 @@
 """
 Database models for CoFound application
 """
-from pydantic import BaseModel, EmailStr, Field
-from typing import Optional, List, Dict, Any
+from pydantic import BaseModel, EmailStr, Field, field_validator
+from typing import Literal, Optional, List, Dict, Any
 from datetime import datetime
 from enum import Enum
 
@@ -105,14 +105,15 @@ class UserSettings(BaseModel):
     notifications_enabled: bool = True
     distance_preference: int = 100  # in km
     show_age: bool = True
-    premium: bool = False
+    # `premium` deliberately lives at the user document root, not here — see
+    # premium.py. A second copy under settings only ever drifted out of sync.
 
 
 # API Request/Response Models
 class UserRegistration(BaseModel):
     email: EmailStr
-    password: str
-    name: str
+    password: str = Field(min_length=8, max_length=128)
+    name: str = Field(min_length=1, max_length=100)
 
 
 class UserLogin(BaseModel):
@@ -136,14 +137,39 @@ class OnboardingData(BaseModel):
     bio: Optional[str] = None
 
 
+class PhotosUpload(BaseModel):
+    """
+    Profile photo upload payload.
+
+    Wrapped in a model so FastAPI reads it from the request body — a bare
+    `List[str]` parameter is parsed as a repeated query parameter. Photos are
+    base64 strings stored inline in the user document, so the total size is capped
+    well below MongoDB's 16 MB document limit.
+    """
+    photos: List[str] = Field(default_factory=list, max_length=5)
+
+    @field_validator("photos")
+    @classmethod
+    def check_photo_sizes(cls, photos: List[str]) -> List[str]:
+        max_photo_chars = 3_000_000  # ~2.2 MB decoded
+        max_total_chars = 10_000_000  # ~7.5 MB decoded, leaves room in the doc
+
+        for photo in photos:
+            if len(photo) > max_photo_chars:
+                raise ValueError("Each photo must be under ~2MB")
+        if sum(len(p) for p in photos) > max_total_chars:
+            raise ValueError("Photos are too large in total; please use smaller images")
+        return photos
+
+
 class SwipeAction(BaseModel):
     target_user_id: str
-    direction: str  # "left" or "right"
+    direction: Literal["left", "right"]
 
 
 class MessageCreate(BaseModel):
     match_id: str
-    content: str
+    content: str = Field(min_length=1, max_length=4000)
     type: str = "text"
 
 
@@ -166,12 +192,17 @@ class MatchResponse(BaseModel):
 
 
 class ProjectCreate(BaseModel):
-    title: str
-    description: str
+    title: str = Field(min_length=1, max_length=200)
+    description: str = Field(min_length=1, max_length=5000)
     looking_for: Profession
-    hours_per_week: int
-    equity_percentage: float
-    skills_needed: List[str]
+    hours_per_week: int = Field(ge=1, le=80)
+    equity_percentage: float = Field(ge=0, le=100)
+    skills_needed: List[str] = Field(default_factory=list, max_length=20)
+
+
+class ProjectApplication(BaseModel):
+    """Message a founder sends when applying to a cofounder opportunity."""
+    message: str = Field(default="", max_length=2000)
 
 
 class DealRoomCreate(BaseModel):

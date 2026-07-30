@@ -73,7 +73,11 @@ export default function ProfileScreen() {
               <Star size={12} color={theme.colors.brand} strokeWidth={2} fill={theme.colors.brand} />
               <Text style={styles.levelText}>Level {gamification.level}</Text>
             </View>
-            <TouchableOpacity style={styles.iconButton} testID="profile-settings">
+            <TouchableOpacity
+              style={styles.iconButton}
+              onPress={() => router.push('/settings')}
+              testID="profile-settings"
+            >
               <Settings size={20} color={theme.colors.text} strokeWidth={1.75} />
             </TouchableOpacity>
           </View>
@@ -154,9 +158,10 @@ export default function ProfileScreen() {
                     <Text style={styles.verifiedIconText}>Verified</Text>
                   </View>
                 ) : (
-                  <TouchableOpacity>
-                    <Text style={styles.verifyLink}>Verify</Text>
-                  </TouchableOpacity>
+                  // No verification flow exists yet (no LinkedIn/GitHub OAuth, no
+                  // identity provider). A tappable "Verify" that did nothing read
+                  // as a broken button, so the pending state is stated plainly.
+                  <Text style={styles.verifyPending}>Coming soon</Text>
                 )}
               </View>
             ))}
@@ -416,10 +421,9 @@ const styles = StyleSheet.create({
     color: theme.colors.brand,
     fontWeight: '500',
   },
-  verifyLink: {
-    ...theme.typography.subhead,
-    color: theme.colors.brand,
-    fontWeight: '500',
+  verifyPending: {
+    ...theme.typography.footnote,
+    color: theme.colors.textSecondary,
   },
   bioText: {
     ...theme.typography.body,

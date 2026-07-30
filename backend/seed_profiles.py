@@ -151,9 +151,9 @@ async def seed():
             "settings": {
                 "notifications_enabled": True,
                 "distance_preference": 100,
-                "show_age": True,
-                "premium": False
+                "show_age": True
             },
+            "premium": False,
             "onboarding_completed": True,
             "created_at": get_utc_now(),
             "updated_at": get_utc_now(),
