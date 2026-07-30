@@ -281,6 +281,15 @@ class APIClient {
     return this.request(`/deal-rooms/${roomId}/equity/accept`, { method: 'POST' });
   }
 
+  // Calls — ICE servers only; the media is peer-to-peer and never hits the backend.
+  async getCallConfig() {
+    return this.request('/calls/config');
+  }
+
+  async getMatchCallConfig(matchId: string) {
+    return this.request(`/matches/${matchId}/call-config`);
+  }
+
   // Personality assessment
   async getPersonalityAssessment() {
     return this.request('/assessment/personality');

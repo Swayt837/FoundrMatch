@@ -6,6 +6,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { IncomingCallListener } from '@/src/components/IncomingCallListener';
 import { AuthProvider } from '@/src/contexts/AuthContext';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import * as SplashScreen from 'expo-splash-screen';
@@ -59,6 +60,9 @@ export default function RootLayout() {
         <QueryClientProvider client={queryClient}>
           <AuthProvider>
             <StatusBar style="light" backgroundColor={theme.colors.surface} />
+            {/* Mounted once, above the navigator: the server rings a user's personal
+                socket room, so a call must be answerable from any screen. */}
+            <IncomingCallListener />
             <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.colors.surface } }}>
               <Stack.Screen name="index" />
               <Stack.Screen name="auth/welcome" />
@@ -68,6 +72,7 @@ export default function RootLayout() {
               <Stack.Screen name="(tabs)" />
               <Stack.Screen name="chat/[matchId]" options={{ presentation: 'card' }} />
               <Stack.Screen name="deal-room/[matchId]" options={{ presentation: 'card' }} />
+              <Stack.Screen name="call/[matchId]" options={{ presentation: 'fullScreenModal' }} />
               <Stack.Screen name="profile/edit" options={{ presentation: 'modal' }} />
               <Stack.Screen name="profile/[id]" options={{ presentation: 'card' }} />
               <Stack.Screen name="project/create" options={{ presentation: 'modal' }} />

@@ -12,6 +12,7 @@ Routers, in the order they are mounted:
     profiles                 onboarding, photos, profile read & edit
     discovery                swipe feed, swipes, matches
     chat                     message history, read receipts, sending
+    calls                    WebRTC ICE configuration (signalling lives in realtime)
     deal_rooms               matched-pair workspace (Premium)
     projects                 cofounder opportunity postings
     ai_routes                compatibility narrative, deep report, ideas, copilot
@@ -31,6 +32,7 @@ from realtime import sio
 from routers import (
     ai_routes,
     auth_routes,
+    calls,
     chat,
     deal_rooms,
     discovery,
@@ -78,6 +80,7 @@ app.include_router(auth_routes.router)
 app.include_router(profiles.router)
 app.include_router(discovery.router)
 app.include_router(chat.router)
+app.include_router(calls.router)
 app.include_router(deal_rooms.router)
 app.include_router(projects.router)
 app.include_router(ai_routes.router)

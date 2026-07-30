@@ -17,6 +17,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ArrowLeft, Send, Phone, Video, Sparkles, Rocket } from 'lucide-react-native';
+import * as Haptics from 'expo-haptics';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { api } from '@/src/api/client';
 import { useMatchSocket } from '@/src/hooks/use-match-socket';
@@ -136,6 +137,20 @@ export default function ChatScreen() {
 
   const isMe = (senderId: string) => senderId === user?.user_id;
 
+  // The peer's name is passed through so the call screen can label the call before
+  // any media arrives.
+  const startCall = (media: 'audio' | 'video') => {
+    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    router.push({
+      pathname: '/call/[matchId]',
+      params: {
+        matchId: matchId!,
+        media,
+        name: matchUser?.profile?.name ?? '',
+      },
+    });
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={['top']} testID="chat-screen">
       <View style={styles.header}>
@@ -158,6 +173,22 @@ export default function ChatScreen() {
           </View>
         </View>
         <View style={styles.headerActions}>
+          {/* These two icons were imported and rendered nowhere. They now place a
+              real call — audio or video — with the founder in this conversation. */}
+          <TouchableOpacity
+            style={styles.iconBtn}
+            onPress={() => startCall('audio')}
+            testID="chat-audio-call"
+          >
+            <Phone size={17} color={theme.colors.text} strokeWidth={1.75} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.iconBtn}
+            onPress={() => startCall('video')}
+            testID="chat-video-call"
+          >
+            <Video size={17} color={theme.colors.text} strokeWidth={1.75} />
+          </TouchableOpacity>
           <TouchableOpacity
             style={styles.dealRoomBtn}
             onPress={() => router.push(`/deal-room/${matchId}`)}
@@ -292,7 +323,17 @@ const styles = StyleSheet.create({
   headerName: { ...theme.typography.headline, color: theme.colors.text },
   headerStatus: { ...theme.typography.caption, color: theme.colors.brand, marginTop: 2 },
   headerStatusTyping: { color: theme.colors.textSecondary, fontStyle: 'italic' },
-  headerActions: { flexDirection: 'row', gap: theme.spacing.sm },
+  headerActions: { flexDirection: 'row', gap: theme.spacing.sm, alignItems: 'center' },
+  iconBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.colors.surfaceSecondary,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
   iconButton: {
     width: 36, height: 36, borderRadius: 18,
     backgroundColor: theme.colors.surfaceSecondary,

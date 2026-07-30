@@ -57,14 +57,44 @@ yarn prebuild                 # regenerate native projects locally
 npx eas build --profile preview --platform ios
 ```
 
-Permissions are declared in `app.json`. The app only reads the photo library, so
-camera and microphone are explicitly blocked — keep that surface minimal, since
-unused permission prompts are an App Store review problem. After changing a plugin,
-verify what actually landed:
+Permissions are declared in `app.json`: photo library (profile pictures), plus camera
+and microphone (video calls, see below). **Always verify what actually landed** rather
+than trusting the config — several plugins write the same Info.plist keys, and the
+last one wins:
 
 ```sh
-yarn prebuild && grep -A1 UsageDescription ios/*/Info.plist
+yarn prebuild
+grep -A1 UsageDescription ios/*/Info.plist
+grep uses-permission android/app/src/main/AndroidManifest.xml
 ```
+
+That check is not academic. `expo-image-picker`'s `microphonePermission: false` does
+not mean "leave it alone" — it *deletes* `NSMicrophoneUsageDescription` and marks
+Android's `RECORD_AUDIO` `tools:node="remove"`, silently stripping the permission the
+call feature depends on. Both `expo-image-picker` and
+`@config-plugins/react-native-webrtc` are therefore given the same explicit strings,
+so the result does not depend on plugin order.
+
+## Video calls
+
+Matched founders can call each other from the chat header, audio or video.
+
+The media is **peer-to-peer** — it never reaches the backend, which only relays
+signalling over the existing Socket.io connection (`backend/realtime.py`) and hands
+out ICE servers (`backend/routers/calls.py`). Every signalling event is authorised
+against the match, so a socket cannot ring a stranger, and the call id is minted
+server-side so it cannot be guessed or hijacked.
+
+Two operational notes:
+
+- **TURN is required for reliability.** STUN alone connects most home networks;
+  mobile data and corporate firewalls need a relay. Set `TURN_URLS`, `TURN_USERNAME`
+  and `TURN_CREDENTIAL` (see `backend/.env.example`). Until then the call screen tells
+  the user calls may not connect, rather than failing without explanation.
+- **A development build is needed on device.** `react-native-webrtc` is a native
+  module, so Expo Go cannot run calls. On web the browser's own WebRTC is used
+  instead, via `src/lib/webrtc.web.ts` — the native module is never bundled for web.
+  `getUserMedia` there requires HTTPS or `localhost`.
 
 ## Tests
 
