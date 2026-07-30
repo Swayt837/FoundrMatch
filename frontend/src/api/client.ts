@@ -205,6 +205,55 @@ class APIClient {
   async getUserProfile(userId: string) {
     return this.request(`/profile/${userId}`);
   }
+
+  // Premium
+  async premiumCheckout(plan: 'lifetime' | 'monthly', originUrl: string) {
+    return this.request('/premium/checkout', {
+      method: 'POST',
+      body: JSON.stringify({ plan, origin_url: originUrl }),
+    });
+  }
+
+  async premiumStatus(sessionId: string) {
+    return this.request(`/premium/status/${sessionId}`);
+  }
+
+  async premiumMe() {
+    return this.request('/premium/me');
+  }
+
+  // Discovery / Projects with filters
+  async getDiscoveryCardsFiltered(params: {
+    limit?: number;
+    profession?: string;
+    availability?: string;
+    city?: string;
+    country?: string;
+  }) {
+    const qs = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== '') qs.append(k, String(v));
+    });
+    return this.request(`/discovery/cards?${qs.toString()}`);
+  }
+
+  async getProjectsFiltered(params: {
+    status?: string;
+    limit?: number;
+    looking_for?: string;
+    skill?: string;
+    min_hours?: number;
+    max_hours?: number;
+    min_equity?: number;
+    max_equity?: number;
+    my_city_only?: boolean;
+  }) {
+    const qs = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== '') qs.append(k, String(v));
+    });
+    return this.request(`/projects?${qs.toString()}`);
+  }
 }
 
 export const api = new APIClient();

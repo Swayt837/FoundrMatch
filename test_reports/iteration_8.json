@@ -1,0 +1,58 @@
+{
+  "summary": "Iteration 8 (backend + frontend): Premium (Stripe) & Filters. Backend: 16/16 pytest passed against /app/backend/tests/test_premium_filters_iter8.py — covers Stripe checkout for lifetime & monthly (both return url+session_id, payment_transactions record inserted with payment_status='pending'), invalid plan → 400, status/{session_id} for own session → 200, unauthorized session → 403 (via seeded txn for another user), /premium/me shape (free: premium=false, daily_swipes_limit=10, remaining_swipes>=0), swipe decrements remaining_swipes, forcing daily_swipes_used=10 → next swipe 402 with 'daily swipe limit', flipping premium=true → /premium/me returns premium:true & remaining_swipes:null AND swipe bypasses 402, discovery sorting (premium first then compatibility desc), discovery profession & availability filters return only matching cards, projects filter (looking_for=designer & min_hours=10 & max_hours=30 & min_equity=5 & max_equity=20) excludes non-matching, my_city_only returns only same-city projects. Frontend (mobile 390x844 viewport, test@cofound.com): 1) /premium loads (data-testid='premium-screen'), both plan cards render (lifetime default selected, monthly clickable), CTA button (data-testid='premium-checkout-btn') fires POST /api/premium/checkout returning 200. 2) Projects: filter icon opens modal (data-testid='projects-filter-btn'), designer chip + min_hours=10 apply → active filter chips ('Role: Designer', '10-∞H/Wk') + 'Clear all' render at top, filtered list shows only designer projects. 3) Discover: filter icon opens modal (data-testid='discover-filter-btn'), profession/availability/city inputs work, apply reloads cards. Deprecation warnings still present ('shadow*' and 'props.pointerEvents') — carried over from iter 4-7, non-blocking.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/premium/status/{session_id}", "issue": "When session_id is truly unknown (never created), returns 404 'Session not found' rather than 403 for other-user's session; behavior is correct — 403 is only reached when a txn exists but belongs to another user (verified via seeded txn). Test-plan step #3 wording ambiguous."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "global (web preview)", "issues": [
+        "shadow* style props deprecation warning still present (carried from iter 4-7).",
+        "props.pointerEvents deprecation warning still present (carried from iter 5-7)."
+      ]}
+    ],
+    "react_native_issues": [
+      {"component": "shadow* style props (deprecated)", "issue": "'shadow*' style props are deprecated in RN 0.75+/react-native-web. Migrate to boxShadow. Reference: /app/frontend/src/theme/index.ts (theme.shadow.*), used across premium/index.tsx, projects.tsx, discover.tsx."},
+      {"component": "props.pointerEvents (deprecated)", "issue": "props.pointerEvents is deprecated; use style.pointerEvents. Reference: any Touchable/Pressable in the tree emitting this warning."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_premium_filters_iter8.py",
+    "/app/test_reports/pytest/iteration_8.xml",
+    "/tmp/it8_01_after_login.png",
+    "/tmp/it8_02_premium.png",
+    "/tmp/it8_03_projects_filter.png",
+    "/tmp/it8_04_projects_filtered.png",
+    "/tmp/it8_05_discover.png",
+    "/tmp/it8_06_discover_modal.png",
+    "/tmp/it8_07_discover_filtered.png",
+    "/tmp/it8_08_profile.png"
+  ],
+  "action_items": [
+    "MEDIUM (code review): /app/backend/database.py:15 hardcodes `db = client.cofound_db` — this ignores DB_NAME env var and violates the environment-variable-only contract. Change to `db = client[os.getenv('DB_NAME','cofound_db')]` so DB_NAME in backend/.env is respected. (Tests had to hardcode 'cofound_db' to compensate.)",
+    "LOW (carried): Migrate theme.shadow.* helpers to boxShadow-compatible form (RN 0.75+/react-native-web deprecation).",
+    "LOW (carried): Replace deprecated props.pointerEvents with style.pointerEvents.",
+    "LOW: Consider adding STRIPE_WEBHOOK_SECRET support & signature verification path — current polling via /premium/status handles activation reliably in dev, but production webhook path won't verify signatures without the secret (backend code correctly falls back)."
+  ],
+  "critical_code_review_comments": [
+    "/app/backend/database.py:15 hardcodes cofound_db → ignore DB_NAME env var. Break of contract.",
+    "premium.py `_apply_premium` correctly sets premium flag; both /status polling path (line 170) and webhook (line 254) are idempotent by checking existing payment_status != 'paid'.",
+    "server.py /api/swipe correctly enforces daily_swipes limit BEFORE recording the swipe (line 441), so limited swipes are not persisted.",
+    "server.py /api/discovery/cards sort is deterministic — premium boost + compat score desc (line 410-414).",
+    "server.py /api/projects filters compose correctly, including my_city_only via same-city user_id set (line 845-854).",
+    "premium.py PLAN_PRICES enforces server-side price registry — client cannot inject amount. Good."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_premium_filters_iter8.py (created)"
+  ],
+  "success_rate": {"backend": "100% (16/16 pytest)", "frontend": "100% (Premium screen loads + checkout fires 200; Projects & Discover filter modals apply and render chips correctly)"},
+  "seed_data_creation": "Three TEST_iter8_* projects were created and cleaned up in teardown_class (designer/20h/10%, developer/40h/25%, designer/5h/30%). Also temporarily set test@cofound.com's profile.city to 'TESTCITY_iter8' for my_city_only test — city was NOT reset; main agent may want to restore original city if it matters, though the follow-up my_city_only test only asserted own projects.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 8 Premium + Filters ships end-to-end. Backend tests live at /app/backend/tests/test_premium_filters_iter8.py — parallel xdist may cause flakes because MongoDB writes race between workers; run with `-o addopts=''` to force single-worker execution (as done here). All frontend testIDs used: premium-screen, premium-plan-lifetime, premium-plan-monthly, premium-checkout-btn, premium-close; projects-filter-btn, filter-profession-<value>, filter-skill-input, filter-min-hours, filter-max-hours, filter-min-equity, filter-max-equity, filter-my-city-toggle, filter-apply, filter-close; discover-filter-btn, discover-filter-profession-<value>, discover-filter-availability-<value>, discover-filter-city, discover-filter-apply, swipe-limit-modal, swipe-limit-upgrade. IMPORTANT: The backend uses hardcoded DB name 'cofound_db' (database.py:15), NOT the DB_NAME env var — any future direct-mongo test setup must target 'cofound_db'.",
+  "rca_of_issue": "N/A — no bug reports this iteration."
+}

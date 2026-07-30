@@ -79,7 +79,15 @@ export default function ProfileScreen() {
           </View>
 
           <View style={styles.heroContent}>
-            <Text style={styles.heroName}>{profile.name}</Text>
+            <View style={styles.nameRow}>
+              <Text style={styles.heroName}>{profile.name}</Text>
+              {user?.premium && (
+                <View style={styles.premiumBadge} testID="premium-badge">
+                  <Sparkles size={11} color={theme.colors.brandOn} strokeWidth={2.5} fill={theme.colors.brandOn} />
+                  <Text style={styles.premiumBadgeText}>PREMIUM</Text>
+                </View>
+              )}
+            </View>
             <Text style={styles.heroRole}>
               {profile.profession ? profile.profession.replace(/_/g, ' ') : 'Complete profile'}
             </Text>
@@ -193,17 +201,36 @@ export default function ProfileScreen() {
 
         {/* Premium CTA */}
         <View style={styles.section}>
-          <TouchableOpacity style={styles.premiumCard} testID="profile-premium-cta">
-            <View style={styles.premiumIcon}>
-              <Sparkles size={22} color={theme.colors.brandOn} strokeWidth={2} />
+          {user?.premium ? (
+            <View style={[styles.premiumCard, styles.premiumCardActive]} testID="profile-premium-active">
+              <View style={styles.premiumIcon}>
+                <Sparkles size={22} color={theme.colors.brand} strokeWidth={2} />
+              </View>
+              <View style={styles.premiumContent}>
+                <Text style={styles.premiumTitleActive}>Premium active</Text>
+                <Text style={styles.premiumDescActive}>
+                  Unlimited swipes, deep AI analysis & priority visibility.
+                </Text>
+              </View>
             </View>
-            <View style={styles.premiumContent}>
-              <Text style={styles.premiumTitle}>Upgrade to Premium</Text>
-              <Text style={styles.premiumDesc}>
-                Unlimited swipes, AI profile coach, and priority matching.
-              </Text>
-            </View>
-          </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={styles.premiumCard}
+              onPress={() => router.push('/premium')}
+              activeOpacity={0.85}
+              testID="profile-premium-cta"
+            >
+              <View style={styles.premiumIcon}>
+                <Sparkles size={22} color={theme.colors.brandOn} strokeWidth={2} />
+              </View>
+              <View style={styles.premiumContent}>
+                <Text style={styles.premiumTitle}>Upgrade to Premium</Text>
+                <Text style={styles.premiumDesc}>
+                  Unlimited swipes, AI profile coach, and priority matching.
+                </Text>
+              </View>
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Actions */}
@@ -437,6 +464,43 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.md,
     backgroundColor: theme.colors.brand,
     ...theme.shadow.goldGlow,
+  },
+  premiumCardActive: {
+    backgroundColor: theme.colors.brandTertiary,
+    borderWidth: 1,
+    borderColor: 'rgba(212,175,55,0.35)',
+  },
+  premiumTitleActive: {
+    ...theme.typography.headline,
+    color: theme.colors.brand,
+    marginBottom: 2,
+  },
+  premiumDescActive: {
+    ...theme.typography.footnote,
+    color: theme.colors.textSecondary,
+  },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.sm,
+    flexWrap: 'wrap',
+  },
+  premiumBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: theme.radius.pill,
+    backgroundColor: theme.colors.brand,
+    ...theme.shadow.goldGlow,
+  },
+  premiumBadgeText: {
+    ...theme.typography.caption,
+    color: theme.colors.brandOn,
+    fontWeight: '700',
+    fontSize: 10,
+    letterSpacing: 0.5,
   },
   premiumIcon: {
     width: 44,

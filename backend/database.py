@@ -23,6 +23,7 @@ deal_rooms_collection = db.deal_rooms
 projects_collection = db.projects
 user_sessions_collection = db.user_sessions
 notifications_collection = db.notifications
+payment_transactions_collection = db.payment_transactions
 
 
 async def create_indexes():

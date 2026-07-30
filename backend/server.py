@@ -31,6 +31,7 @@ from auth import (
     create_or_get_user_from_google, store_session
 )
 from ai_service import ai_service, TextDelta, StreamDone
+from premium import router as premium_router, webhook_router as premium_webhook_router
 
 load_dotenv()
 
@@ -65,6 +66,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include Premium (Stripe) routes
+app.include_router(premium_router)
+app.include_router(premium_webhook_router)
 
 
 # ===== AUTHENTICATION ROUTES =====
@@ -332,9 +337,13 @@ async def update_profile(
 @app.get("/api/discovery/cards")
 async def get_discovery_cards(
     limit: int = 10,
+    profession: Optional[str] = None,
+    availability: Optional[str] = None,
+    city: Optional[str] = None,
+    country: Optional[str] = None,
     current_user: dict = Depends(get_current_user)
 ):
-    """Get cards for swiping - with parallel AI + cache"""
+    """Get cards for swiping - with parallel AI + cache. Supports optional filters."""
     import asyncio
     from database import db as mongo_db
     
@@ -350,13 +359,24 @@ async def get_discovery_cards(
     # Get potential matches (exclude self and already swiped)
     exclude_ids = swiped_ids + [user_id]
     
+    # Build filter query
+    query: Dict[str, Any] = {
+        "user_id": {"$nin": exclude_ids},
+        "onboarding_completed": True,
+    }
+    if profession:
+        query["profile.profession"] = profession
+    if availability:
+        query["profile.availability"] = availability
+    if city:
+        query["profile.city"] = {"$regex": f"^{city}$", "$options": "i"}
+    if country:
+        query["profile.country"] = {"$regex": f"^{country}$", "$options": "i"}
+    
     candidates = await users_collection.find(
-        {
-            "user_id": {"$nin": exclude_ids},
-            "onboarding_completed": True
-        },
+        query,
         {"_id": 0, "password_hash": 0, "google_id": 0}
-    ).limit(limit).to_list(limit)
+    ).limit(max(limit * 3, limit)).to_list(max(limit * 3, limit))
     
     if not candidates:
         return {"cards": []}
@@ -386,8 +406,15 @@ async def get_discovery_cards(
     results = await asyncio.gather(*[compute_or_cache(c) for c in candidates])
     cards = [r for r in results if r is not None]
     
-    # Sort by compatibility score
-    cards.sort(key=lambda x: x["compatibility"]["overall_score"], reverse=True)
+    # Sort — premium users first, then by compatibility score
+    def sort_key(card):
+        is_premium = 1 if card["user"].get("premium") else 0
+        score = card["compatibility"]["overall_score"]
+        return (-is_premium, -score)
+    cards.sort(key=sort_key)
+    
+    # Trim to requested limit after sorting
+    cards = cards[:limit]
     
     return {"cards": cards}
 
@@ -400,6 +427,22 @@ async def swipe(
     """Swipe on a user"""
     user_id = current_user["user_id"]
     target_id = action.target_user_id
+    
+    # Enforce daily swipe limit for free users
+    from datetime import timezone as _tz
+    today = datetime.now(_tz.utc).strftime("%Y-%m-%d")
+    is_premium = bool(current_user.get("premium", False))
+    daily_limit = 10  # free tier
+    
+    swipes_today = 0
+    if current_user.get("daily_swipes_date") == today:
+        swipes_today = current_user.get("daily_swipes_used", 0)
+    
+    if not is_premium and swipes_today >= daily_limit:
+        raise HTTPException(
+            status_code=402,
+            detail="Daily swipe limit reached. Upgrade to Premium for unlimited swipes."
+        )
     
     # Check if already swiped
     existing = await swipes_collection.find_one({
@@ -418,6 +461,13 @@ async def swipe(
         "created_at": get_utc_now()
     }
     await swipes_collection.insert_one(swipe_data)
+    
+    # Increment daily swipe counter
+    await users_collection.update_one(
+        {"user_id": user_id},
+        {"$set": {"daily_swipes_date": today,
+                  "daily_swipes_used": swipes_today + 1}}
+    )
     
     # Check for match (if right swipe)
     if action.direction == "right":
@@ -760,11 +810,51 @@ async def create_project(
 async def get_projects(
     status: str = "open",
     limit: int = 20,
+    looking_for: Optional[str] = None,
+    skill: Optional[str] = None,
+    min_hours: Optional[int] = None,
+    max_hours: Optional[int] = None,
+    min_equity: Optional[float] = None,
+    max_equity: Optional[float] = None,
+    my_city_only: bool = False,
     current_user: dict = Depends(get_current_user)
 ):
-    """Get project listings"""
+    """Get project listings with optional filters."""
+    query: Dict[str, Any] = {"status": status}
+    if looking_for:
+        query["looking_for"] = looking_for
+    if skill:
+        # Case-insensitive skill match
+        query["skills_needed"] = {"$regex": f"^{skill}$", "$options": "i"}
+    hours_query = {}
+    if min_hours is not None:
+        hours_query["$gte"] = min_hours
+    if max_hours is not None:
+        hours_query["$lte"] = max_hours
+    if hours_query:
+        query["hours_per_week"] = hours_query
+    equity_query = {}
+    if min_equity is not None:
+        equity_query["$gte"] = min_equity
+    if max_equity is not None:
+        equity_query["$lte"] = max_equity
+    if equity_query:
+        query["equity_percentage"] = equity_query
+    
+    # my-city-only filter: only projects from users in my city
+    if my_city_only:
+        my_city = (current_user.get("profile") or {}).get("city")
+        if my_city:
+            # Find user_ids in same city
+            same_city_users = await users_collection.find(
+                {"profile.city": {"$regex": f"^{my_city}$", "$options": "i"}},
+                {"user_id": 1, "_id": 0}
+            ).to_list(1000)
+            city_user_ids = [u["user_id"] for u in same_city_users]
+            query["user_id"] = {"$in": city_user_ids}
+    
     projects = await projects_collection.find(
-        {"status": status},
+        query,
         {"_id": 0}
     ).sort("created_at", -1).limit(limit).to_list(limit)
     

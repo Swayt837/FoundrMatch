@@ -14,12 +14,13 @@ import {
   useWindowDimensions,
   Platform,
   ScrollView,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { useRouter } from 'expo-router';
-import { X, Heart, Zap, MapPin, Briefcase, Clock, Sparkles, Info } from 'lucide-react-native';
+import { X, Heart, Zap, MapPin, Briefcase, Clock, Sparkles, Info, SlidersHorizontal, Check } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { api } from '@/src/api/client';
@@ -29,6 +30,29 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = { width: 390, height: 844
 const SWIPE_THRESHOLD = 120;
 
 const PLACEHOLDER_IMAGE = 'https://images.unsplash.com/photo-1642290687545-8ab7e6002472?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA3MDR8MHwxfHNlYXJjaHwyfHxwcmVtaXVtJTIwcG9ydHJhaXQlMjBibGFjayUyMGFuZCUyMHdoaXRlfGVufDB8fHx8MTc4NTMyNzI2MXww&ixlib=rb-4.1.0&q=85';
+
+const PROFESSION_OPTIONS = [
+  { value: 'developer', label: 'Developer' },
+  { value: 'designer', label: 'Designer' },
+  { value: 'marketer', label: 'Marketer' },
+  { value: 'sales', label: 'Sales' },
+  { value: 'product_manager', label: 'Product' },
+  { value: 'finance', label: 'Finance' },
+  { value: 'content_creator', label: 'Creator' },
+];
+const AVAILABILITY_OPTIONS = [
+  { value: 'full_time', label: 'Full time' },
+  { value: '10h_week', label: '10h/week' },
+  { value: '20h_week', label: '20h/week' },
+  { value: 'evenings', label: 'Evenings' },
+  { value: 'weekends', label: 'Weekends' },
+];
+
+interface DiscoverFilters {
+  profession?: string;
+  availability?: string;
+  city?: string;
+}
 
 interface Card {
   user: any;
@@ -53,14 +77,20 @@ export default function DiscoverScreen() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [swipeLimitError, setSwipeLimitError] = useState(false);
   const [matchModal, setMatchModal] = useState<MatchModal>({ visible: false, user: null, compatibility: null, matchId: '' });
+  const [filters, setFilters] = useState<DiscoverFilters>({});
+  const [showFilters, setShowFilters] = useState(false);
   const position = useRef(new Animated.ValueXY()).current;
+
+  const activeFilterCount = Object.values(filters).filter(v => v).length;
 
   useEffect(() => {
     if (user) {
       loadCards();
     }
-  }, [user]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, filters]);
 
   const haptic = (type: 'light' | 'medium' | 'success' = 'light') => {
     if (Platform.OS === 'web') return;
@@ -75,7 +105,7 @@ export default function DiscoverScreen() {
     setLoading(true);
     setError(null);
     try {
-      const response = await api.getDiscoveryCards(10);
+      const response = await api.getDiscoveryCardsFiltered({ limit: 10, ...filters });
       setCards(response.cards || []);
       setCurrentIndex(0);
     } catch (err: any) {
@@ -104,8 +134,19 @@ export default function DiscoverScreen() {
           matchId: response.match_id,
         });
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Swipe error:', error);
+      // Detect the 402 daily-limit error from backend
+      if (error?.message?.toLowerCase().includes('daily swipe limit')) {
+        setSwipeLimitError(true);
+        // Rewind card position
+        Animated.spring(position, {
+          toValue: { x: 0, y: 0 },
+          friction: 8,
+          useNativeDriver: false,
+        }).start();
+        return;
+      }
     }
 
     setCurrentIndex(prev => prev + 1);
@@ -258,9 +299,24 @@ export default function DiscoverScreen() {
           <Text style={styles.eyebrow}>SWIPE TO CONNECT</Text>
           <Text style={styles.brandTitle}>Discover</Text>
         </View>
-        <View style={styles.aiIndicator}>
-          <Sparkles size={12} color={theme.colors.brand} strokeWidth={2} />
-          <Text style={styles.aiText}>AI Curated</Text>
+        <View style={styles.headerRight}>
+          <TouchableOpacity
+            style={styles.filterBtn}
+            onPress={() => setShowFilters(true)}
+            activeOpacity={0.8}
+            testID="discover-filter-btn"
+          >
+            <SlidersHorizontal size={16} color={theme.colors.text} strokeWidth={1.75} />
+            {activeFilterCount > 0 && (
+              <View style={styles.filterBadge}>
+                <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+          <View style={styles.aiIndicator}>
+            <Sparkles size={12} color={theme.colors.brand} strokeWidth={2} />
+            <Text style={styles.aiText}>AI</Text>
+          </View>
         </View>
       </View>
 
@@ -441,9 +497,206 @@ export default function DiscoverScreen() {
           </View>
         </View>
       )}
+
+      {/* Filter modal */}
+      <DiscoverFilterModal
+        visible={showFilters}
+        onClose={() => setShowFilters(false)}
+        filters={filters}
+        onApply={(f) => { setFilters(f); setShowFilters(false); }}
+      />
+
+      {/* Swipe limit reached - premium paywall */}
+      {swipeLimitError && (
+        <View style={styles.matchOverlay} testID="swipe-limit-modal">
+          <BlurView intensity={95} tint="dark" style={StyleSheet.absoluteFillObject} />
+          <View style={styles.matchContent}>
+            <View style={styles.limitIcon}>
+              <Zap size={36} color={theme.colors.brand} strokeWidth={1.75} fill={theme.colors.brand} />
+            </View>
+            <Text style={styles.matchEyebrow}>DAILY LIMIT REACHED</Text>
+            <Text style={styles.matchTitle}>Out of swipes</Text>
+            <Text style={styles.matchDesc}>
+              You've hit today's free limit. Upgrade to Premium for unlimited swipes and priority visibility.
+            </Text>
+            <TouchableOpacity
+              style={styles.matchCta}
+              onPress={() => { setSwipeLimitError(false); router.push('/premium'); }}
+              activeOpacity={0.85}
+              testID="swipe-limit-upgrade"
+            >
+              <Text style={styles.matchCtaText}>Unlock Premium</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.matchSecondary}
+              onPress={() => setSwipeLimitError(false)}
+              testID="swipe-limit-close"
+            >
+              <Text style={styles.matchSecondaryText}>Maybe later</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
+
+/* ================== Discover Filter Modal ================== */
+function DiscoverFilterModal({
+  visible,
+  onClose,
+  filters,
+  onApply,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  filters: DiscoverFilters;
+  onApply: (f: DiscoverFilters) => void;
+}) {
+  const insets = useSafeAreaInsets();
+  const [local, setLocal] = React.useState<DiscoverFilters>(filters);
+
+  React.useEffect(() => {
+    if (visible) setLocal(filters);
+  }, [visible, filters]);
+
+  if (!visible) return null;
+
+  const setField = (k: keyof DiscoverFilters, v?: string) => {
+    setLocal(prev => ({ ...prev, [k]: prev[k] === v ? undefined : v }));
+  };
+
+  return (
+    <View style={filterStyles.backdrop} testID="discover-filter-modal">
+      <TouchableOpacity style={StyleSheet.absoluteFillObject} onPress={onClose} activeOpacity={1} />
+      <View style={[filterStyles.sheet, { paddingBottom: insets.bottom + 16 }]}>
+        <View style={filterStyles.handle} />
+        <View style={filterStyles.header}>
+          <TouchableOpacity onPress={onClose}>
+            <Text style={filterStyles.cancel}>Cancel</Text>
+          </TouchableOpacity>
+          <Text style={filterStyles.title}>Filters</Text>
+          <TouchableOpacity onPress={() => setLocal({})}>
+            <Text style={filterStyles.reset}>Reset</Text>
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView contentContainerStyle={filterStyles.body} showsVerticalScrollIndicator={false}>
+          <Text style={filterStyles.label}>Profession</Text>
+          <View style={filterStyles.chips}>
+            {PROFESSION_OPTIONS.map(p => (
+              <TouchableOpacity
+                key={p.value}
+                style={[filterStyles.chip, local.profession === p.value && filterStyles.chipOn]}
+                onPress={() => setField('profession', p.value)}
+                testID={`discover-filter-profession-${p.value}`}
+              >
+                <Text style={[filterStyles.chipText, local.profession === p.value && filterStyles.chipTextOn]}>
+                  {p.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <Text style={filterStyles.label}>Availability</Text>
+          <View style={filterStyles.chips}>
+            {AVAILABILITY_OPTIONS.map(a => (
+              <TouchableOpacity
+                key={a.value}
+                style={[filterStyles.chip, local.availability === a.value && filterStyles.chipOn]}
+                onPress={() => setField('availability', a.value)}
+                testID={`discover-filter-availability-${a.value}`}
+              >
+                <Text style={[filterStyles.chipText, local.availability === a.value && filterStyles.chipTextOn]}>
+                  {a.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <Text style={filterStyles.label}>City</Text>
+          <TextInput
+            style={filterStyles.input}
+            placeholder="e.g. New York, Paris, Tokyo"
+            placeholderTextColor={theme.colors.textSecondary}
+            value={local.city ?? ''}
+            onChangeText={(t) => setLocal(prev => ({ ...prev, city: t || undefined }))}
+            testID="discover-filter-city"
+          />
+        </ScrollView>
+
+        <TouchableOpacity
+          style={filterStyles.applyBtn}
+          onPress={() => onApply(local)}
+          activeOpacity={0.9}
+          testID="discover-filter-apply"
+        >
+          <Text style={filterStyles.applyText}>Apply filters</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+const filterStyles = StyleSheet.create({
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    zIndex: 200,
+  },
+  sheet: {
+    backgroundColor: theme.colors.surfaceSecondary,
+    borderTopLeftRadius: theme.radius.xl,
+    borderTopRightRadius: theme.radius.xl,
+    maxHeight: '85%',
+    paddingHorizontal: theme.spacing.xl,
+    paddingTop: theme.spacing.md,
+  },
+  handle: {
+    width: 40, height: 4, borderRadius: 2,
+    backgroundColor: theme.colors.borderStrong,
+    alignSelf: 'center', marginBottom: theme.spacing.md,
+  },
+  header: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingBottom: theme.spacing.md,
+    borderBottomWidth: 1, borderBottomColor: theme.colors.divider,
+  },
+  cancel: { ...theme.typography.callout, color: theme.colors.textSecondary },
+  title: { ...theme.typography.headline, color: theme.colors.text },
+  reset: { ...theme.typography.callout, color: theme.colors.brand, fontWeight: '500' },
+  body: { paddingVertical: theme.spacing.xl, gap: theme.spacing.md },
+  label: { ...theme.typography.footnote, color: theme.colors.textSecondary, fontWeight: '500', marginTop: theme.spacing.sm },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: theme.spacing.sm, marginBottom: theme.spacing.sm },
+  chip: {
+    paddingHorizontal: 14, paddingVertical: 8,
+    borderRadius: theme.radius.pill,
+    backgroundColor: theme.colors.surfaceTertiary,
+    borderWidth: 1, borderColor: theme.colors.border,
+  },
+  chipOn: { backgroundColor: theme.colors.brand, borderColor: theme.colors.brand },
+  chipText: { ...theme.typography.subhead, color: theme.colors.text },
+  chipTextOn: { color: theme.colors.brandOn, fontWeight: '600' },
+  input: {
+    ...theme.typography.body,
+    color: theme.colors.text,
+    backgroundColor: theme.colors.surfaceTertiary,
+    borderWidth: 1, borderColor: theme.colors.border,
+    borderRadius: theme.radius.md,
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: 12,
+  },
+  applyBtn: {
+    marginTop: theme.spacing.md,
+    paddingVertical: 16,
+    borderRadius: theme.radius.pill,
+    backgroundColor: theme.colors.brand,
+    alignItems: 'center',
+    ...theme.shadow.goldGlow,
+  },
+  applyText: { ...theme.typography.headline, color: theme.colors.brandOn, fontWeight: '700' },
+});
 
 const styles = StyleSheet.create({
   container: {
@@ -492,6 +745,32 @@ const styles = StyleSheet.create({
     ...theme.typography.caption,
     color: theme.colors.brand,
     fontWeight: '500',
+  },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm },
+  filterBtn: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: theme.colors.surfaceSecondary,
+    borderWidth: 1, borderColor: theme.colors.borderStrong,
+    alignItems: 'center', justifyContent: 'center',
+    position: 'relative',
+  },
+  filterBadge: {
+    position: 'absolute', top: -3, right: -3,
+    minWidth: 16, height: 16, borderRadius: 8,
+    backgroundColor: theme.colors.brand,
+    alignItems: 'center', justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  filterBadgeText: {
+    ...theme.typography.caption, color: theme.colors.brandOn,
+    fontWeight: '700', fontSize: 9,
+  },
+  limitIcon: {
+    width: 80, height: 80, borderRadius: 40,
+    backgroundColor: theme.colors.brandTertiary,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: 'rgba(212,175,55,0.3)',
+    marginBottom: theme.spacing.md,
   },
   cardStack: {
     flex: 1,
