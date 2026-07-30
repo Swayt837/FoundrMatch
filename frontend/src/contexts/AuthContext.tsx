@@ -10,7 +10,15 @@
  * runs the standard flow against Google directly with PKCE, and the ID token is
  * verified server-side before an account is touched.
  */
-import React, { createContext, useState, useContext, useEffect } from 'react';
+import React, {
+  createContext,
+  useState,
+  useContext,
+  useEffect,
+  useCallback,
+  useRef,
+} from 'react';
+import { Platform } from 'react-native';
 import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
 import { storage } from '@/src/utils/storage';
@@ -33,7 +41,63 @@ const GOOGLE_CLIENT_IDS = {
   webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
 };
 
-export const googleSignInConfigured = Object.values(GOOGLE_CLIENT_IDS).some(Boolean);
+/**
+ * Whether Google sign-in can run *here*. Google's provider needs the client id for
+ * the platform it is running on, so having any one of the three is not enough — a
+ * web build holding only the iOS id would still throw.
+ */
+const CLIENT_ID_FOR_THIS_PLATFORM = Platform.select({
+  ios: GOOGLE_CLIENT_IDS.iosClientId,
+  android: GOOGLE_CLIENT_IDS.androidClientId,
+  default: GOOGLE_CLIENT_IDS.webClientId,
+});
+
+export const googleSignInConfigured = Boolean(CLIENT_ID_FOR_THIS_PLATFORM);
+
+type GooglePrompt = () => Promise<unknown>;
+
+/**
+ * Holds Google's auth hook, and nothing else.
+ *
+ * `useIdTokenAuthRequest` throws outright when the platform's client id is
+ * missing, so it cannot live in `AuthProvider`: an unconfigured build would take
+ * the entire app down with it — a blank screen, before any error boundary or the
+ * `googleSignInConfigured` checks below could do anything. Isolating it here means
+ * the app runs without Google and simply doesn't offer the button.
+ *
+ * This is not a conditionally-called hook: `googleSignInConfigured` is derived
+ * from build-time environment variables and never changes, so this component
+ * either mounts for the process's whole life or never mounts at all.
+ */
+function GoogleAuthBridge({
+  promptRef,
+  onIdToken,
+}: {
+  promptRef: React.MutableRefObject<GooglePrompt | null>;
+  onIdToken: (idToken: string) => void;
+}) {
+  const [request, response, promptAsync] = Google.useIdTokenAuthRequest(GOOGLE_CLIENT_IDS);
+
+  // `request` is null until the PKCE challenge has been generated, and prompting
+  // before then silently does nothing — so the prompt is only published once it is
+  // genuinely usable, and `signInWithGoogle` can tell the difference.
+  promptRef.current = request ? promptAsync : null;
+
+  useEffect(() => {
+    if (response?.type !== 'success') return;
+
+    // `id_token` is the identity assertion the backend verifies. The access token
+    // Google also returns is for calling Google's own APIs, which we do not do.
+    const idToken = response.params?.id_token;
+    if (!idToken) {
+      console.error('Google sign-in returned no id_token');
+      return;
+    }
+    onIdToken(idToken);
+  }, [response, onIdToken]);
+
+  return null;
+}
 
 export interface UserVerification {
   email_verified: boolean;
@@ -87,11 +151,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Google's response arrives asynchronously after the browser closes, so the flow
-  // is driven by a hook and completed in the effect below rather than awaited inline.
-  const [googleRequest, googleResponse, promptGoogle] = Google.useIdTokenAuthRequest(
-    GOOGLE_CLIENT_IDS
-  );
+  // Published by GoogleAuthBridge when — and only when — Google is configured.
+  const googlePromptRef = useRef<GooglePrompt | null>(null);
 
   useEffect(() => {
     // Setup 401 handler to force logout + redirect
@@ -104,27 +165,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     checkExistingSession();
   }, []);
 
-  useEffect(() => {
-    if (googleResponse?.type !== 'success') return;
-
-    // `id_token` is the identity assertion the backend verifies. The access token
-    // Google also returns is for calling Google's own APIs, which we do not do.
-    const idToken = googleResponse.params?.id_token;
-    if (!idToken) {
-      console.error('Google sign-in returned no id_token');
-      return;
+  // Google's response arrives asynchronously after the browser closes, so the
+  // session is established here rather than awaited inline at the call site.
+  const handleGoogleIdToken = useCallback(async (idToken: string) => {
+    try {
+      const session = await api.googleCallback(idToken);
+      await storage.secureSet('auth_token', session.access_token);
+      setUser(await api.getMe());
+    } catch (error) {
+      console.error('Google sign in failed:', error);
     }
-
-    (async () => {
-      try {
-        const session = await api.googleCallback(idToken);
-        await storage.secureSet('auth_token', session.access_token);
-        setUser(await api.getMe());
-      } catch (error) {
-        console.error('Google sign in failed:', error);
-      }
-    })();
-  }, [googleResponse]);
+  }, []);
 
   const checkExistingSession = async () => {
     try {
@@ -167,13 +218,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         'Google sign-in is not configured. Set EXPO_PUBLIC_GOOGLE_*_CLIENT_ID.'
       );
     }
-    // `googleRequest` is null until the PKCE challenge has been generated; prompting
-    // before then silently does nothing.
-    if (!googleRequest) {
+    const prompt = googlePromptRef.current;
+    if (!prompt) {
       throw new Error('Google sign-in is still initialising. Try again in a moment.');
     }
 
-    await promptGoogle();
+    await prompt();
   };
 
   const signOut = async () => {
@@ -211,6 +261,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         refreshUser,
       }}
     >
+      {googleSignInConfigured && (
+        <GoogleAuthBridge promptRef={googlePromptRef} onIdToken={handleGoogleIdToken} />
+      )}
       {children}
     </AuthContext.Provider>
   );
