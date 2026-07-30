@@ -1,0 +1,73 @@
+# Render blueprint — deploys backend/ as a Docker web service.
+#
+# Render → New → Blueprint → pick this repo. Everything marked `sync: false` is a
+# secret you fill in the dashboard; nothing secret is ever committed here.
+#
+# Use a paid instance, not Free: a free instance sleeps after 15 minutes of
+# inactivity, which drops every open Socket.io connection (chat, incoming calls)
+# and adds a cold start to the next request.
+
+services:
+  - type: web
+    name: cofound-api
+    runtime: docker
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    region: frankfurt
+    healthCheckPath: /api/health
+    autoDeploy: true
+
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+
+      # Generated once by Render and never shown in the repo. Changing it
+      # invalidates every issued JWT, i.e. signs everyone out.
+      - key: SECRET_KEY
+        generateValue: true
+
+      # --- Database (MongoDB Atlas connection string) ---
+      - key: MONGO_URL
+        sync: false
+      - key: DB_NAME
+        value: cofound
+
+      # Comma-separated. Mobile apps send no Origin header, so this only gates the
+      # web build; keep it tight rather than "*", which also disables credentials.
+      - key: ALLOWED_ORIGINS
+        sync: false
+
+      # --- Google Sign-In: the iOS, Android and Web client IDs, comma-separated ---
+      - key: GOOGLE_CLIENT_IDS
+        sync: false
+
+      # --- Claude ---
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: LLM_MODEL
+        value: claude-opus-5
+
+      # --- Stripe (web checkout; iOS/Android go through in-app purchase) ---
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_PRICE_MONTHLY
+        sync: false
+      - key: PREMIUM_CURRENCY
+        value: eur
+      - key: PREMIUM_LIFETIME_AMOUNT
+        value: "29.00"
+      - key: PREMIUM_MONTHLY_AMOUNT
+        value: "9.99"
+
+      # --- Video calls ---
+      # Without a TURN relay, roughly 10-20% of calls connect signalling and then
+      # fail to establish media. The app warns the user while these are unset.
+      - key: TURN_URLS
+        sync: false
+      - key: TURN_USERNAME
+        sync: false
+      - key: TURN_CREDENTIAL
+        sync: false
