@@ -21,7 +21,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { ArrowLeft, Bell, Eye, MapPin, ShieldOff, Trash2 } from 'lucide-react-native';
+import { ArrowLeft, Bell, Eye, MapPin, ShieldOff, Sparkles, Trash2 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { api } from '@/src/api/client';
 import { useAuth } from '@/src/contexts/AuthContext';
@@ -42,6 +42,7 @@ export default function SettingsScreen() {
   const { signOut, refreshUser } = useAuth();
 
   const [settings, setSettings] = useState<Settings | null>(null);
+  const [premium, setPremium] = useState<any>(null);
   const [blocked, setBlocked] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -57,13 +58,15 @@ export default function SettingsScreen() {
   const load = async () => {
     setLoading(true);
     try {
-      const [settingsResponse, blockedResponse] = await Promise.all([
+      const [settingsResponse, blockedResponse, premiumResponse] = await Promise.all([
         api.getSettings(),
         api.getBlockedUsers(),
+        api.premiumMe().catch(() => null),
       ]);
       setSettings(settingsResponse);
       setDistanceDraft(String(settingsResponse.distance_preference ?? 100));
       setBlocked(blockedResponse.blocked || []);
+      setPremium(premiumResponse);
     } catch (e: any) {
       setError(e?.detail || e?.message || 'Could not load settings');
     } finally {
@@ -111,6 +114,32 @@ export default function SettingsScreen() {
     } catch (e: any) {
       setError(e?.detail || e?.message || 'Could not unblock');
     }
+  };
+
+  const confirmCancelSubscription = () => {
+    const until = premium?.premium_expires_at
+      ? new Date(premium.premium_expires_at).toLocaleDateString()
+      : 'the end of your current period';
+    const message = `Your subscription stops renewing. You keep Premium until ${until}.`;
+
+    const run = async () => {
+      try {
+        await api.cancelSubscription();
+        await load();
+        await refreshUser();
+      } catch (e: any) {
+        setError(e?.detail || e?.message || 'Could not cancel the subscription');
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      if (window.confirm(`Cancel your subscription?\n\n${message}`)) run();
+      return;
+    }
+    Alert.alert('Cancel subscription', message, [
+      { text: 'Keep Premium', style: 'cancel' },
+      { text: 'Cancel renewal', style: 'destructive', onPress: run },
+    ]);
   };
 
   const confirmDelete = () => {
@@ -217,6 +246,51 @@ export default function SettingsScreen() {
           <Text style={styles.hint}>
             Distance is stored on your profile. Location-based filtering is not live yet.
           </Text>
+
+          {/* Subscription — app stores require a visible way to manage a recurring
+              purchase, and there was previously no subscription to manage. */}
+          <Text style={styles.sectionTitle}>Subscription</Text>
+          <View style={styles.card}>
+            <View style={[styles.row, premium?.premium && styles.rowLast]}>
+              <View style={styles.rowLabel}>
+                <Sparkles size={17} color={theme.colors.brand} strokeWidth={1.75} />
+                <Text style={styles.rowText}>
+                  {premium?.premium
+                    ? premium.plan === 'lifetime'
+                      ? 'Premium — lifetime'
+                      : 'Premium — monthly'
+                    : 'Free plan'}
+                </Text>
+              </View>
+              {!premium?.premium && (
+                <TouchableOpacity onPress={() => router.push('/premium')} testID="settings-upgrade">
+                  <Text style={styles.unblockText}>Upgrade</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {premium?.premium && premium.plan !== 'lifetime' && (
+              <View style={[styles.row, styles.rowLast]}>
+                <View style={styles.rowLabel}>
+                  <Text style={styles.rowSubText}>
+                    {premium.cancel_at_period_end
+                      ? `Ends ${new Date(premium.premium_expires_at).toLocaleDateString()}`
+                      : premium.premium_expires_at
+                        ? `Renews ${new Date(premium.premium_expires_at).toLocaleDateString()}`
+                        : 'Active'}
+                  </Text>
+                </View>
+                {!premium.cancel_at_period_end && (
+                  <TouchableOpacity
+                    onPress={confirmCancelSubscription}
+                    testID="settings-cancel-subscription"
+                  >
+                    <Text style={styles.cancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
+          </View>
 
           {/* Blocked users */}
           <Text style={styles.sectionTitle}>Blocked founders</Text>
@@ -348,6 +422,8 @@ const styles = StyleSheet.create({
   emptyText: { ...theme.typography.subhead, color: theme.colors.textSecondary },
   blockedAvatar: { width: 32, height: 32, borderRadius: 16 },
   unblockText: { ...theme.typography.subhead, color: theme.colors.brand, fontWeight: '500' },
+  cancelText: { ...theme.typography.subhead, color: theme.colors.errorOn, fontWeight: '500' },
+  rowSubText: { ...theme.typography.footnote, color: theme.colors.textSecondary },
   dangerRow: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -32,6 +32,18 @@ import { api } from '@/src/api/client';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { theme } from '@/src/theme';
 
+/** Mirrors the backend plan registry in premium.py. */
+interface Plan {
+  id: string;
+  name: string;
+  amount: number;
+  currency: string;
+  /** null for a one-time purchase, "month" for a subscription. */
+  interval: string | null;
+  available: boolean;
+  unavailable_reason: string | null;
+}
+
 const BENEFITS = [
   {
     icon: InfinityIcon,
@@ -62,6 +74,35 @@ export default function PremiumScreen() {
   const [selectedPlan, setSelectedPlan] = useState<'lifetime' | 'monthly'>('lifetime');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Plans come from the backend rather than being hardcoded here, so the paywall
+  // can't advertise a plan the server isn't configured to sell — the monthly plan
+  // needs a Stripe Price object to actually recur.
+  const [plans, setPlans] = useState<Plan[] | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const response = await api.getPremiumPlans();
+        const available: Plan[] = (response.plans || []).filter((p: Plan) => p.available);
+        setPlans(available);
+        if (available.length && !available.some((p) => p.id === selectedPlan)) {
+          setSelectedPlan(available[0].id as 'lifetime' | 'monthly');
+        }
+      } catch {
+        setPlans([]);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const planById = (id: string) => plans?.find((p) => p.id === id);
+  const priceLabel = (plan?: Plan) => {
+    if (!plan) return '';
+    const symbol = plan.currency === 'eur' ? '€' : plan.currency === 'usd' ? '$' : '';
+    const amount = Number.isInteger(plan.amount) ? plan.amount : plan.amount.toFixed(2);
+    return `${symbol}${amount}`;
+  };
 
   const haptic = (heavy = false) => {
     if (Platform.OS !== 'web') {
@@ -179,66 +220,59 @@ export default function PremiumScreen() {
             ))}
           </View>
 
-          {/* Plan selector */}
+          {/* Plan selector — rendered from the server's plan registry */}
           <Text style={styles.chooseTitle}>Choose your plan</Text>
-          <View style={styles.plans}>
-            <TouchableOpacity
-              style={[styles.planCard, selectedPlan === 'lifetime' && styles.planCardSelected]}
-              onPress={() => {
-                haptic();
-                setSelectedPlan('lifetime');
-              }}
-              activeOpacity={0.85}
-              testID="premium-plan-lifetime"
-            >
-              <View style={styles.planTop}>
-                <View style={styles.planLabels}>
-                  <Text style={styles.planName}>Lifetime</Text>
-                  <View style={styles.bestValue}>
-                    <Text style={styles.bestValueText}>BEST VALUE</Text>
+          {plans === null ? (
+            <ActivityIndicator color={theme.colors.brand} style={styles.plansLoading} />
+          ) : plans.length === 0 ? (
+            <Text style={styles.planDesc}>
+              No plans are available right now. Please try again later.
+            </Text>
+          ) : (
+            <View style={styles.plans}>
+              {plans.map((plan) => (
+                <TouchableOpacity
+                  key={plan.id}
+                  style={[styles.planCard, selectedPlan === plan.id && styles.planCardSelected]}
+                  onPress={() => {
+                    haptic();
+                    setSelectedPlan(plan.id as 'lifetime' | 'monthly');
+                  }}
+                  activeOpacity={0.85}
+                  testID={`premium-plan-${plan.id}`}
+                >
+                  <View style={styles.planTop}>
+                    <View style={styles.planLabels}>
+                      <Text style={styles.planName}>
+                        {plan.interval ? 'Monthly' : 'Lifetime'}
+                      </Text>
+                      {!plan.interval && (
+                        <View style={styles.bestValue}>
+                          <Text style={styles.bestValueText}>BEST VALUE</Text>
+                        </View>
+                      )}
+                    </View>
+                    {selectedPlan === plan.id && (
+                      <View style={styles.checkDot}>
+                        <Check size={14} color={theme.colors.brandOn} strokeWidth={3} />
+                      </View>
+                    )}
                   </View>
-                </View>
-                {selectedPlan === 'lifetime' && (
-                  <View style={styles.checkDot}>
-                    <Check size={14} color={theme.colors.brandOn} strokeWidth={3} />
+                  <View style={styles.priceRow}>
+                    <Text style={styles.priceAmount}>{priceLabel(plan)}</Text>
+                    <Text style={styles.priceUnit}>
+                      {plan.interval ? `/ ${plan.interval}` : 'once'}
+                    </Text>
                   </View>
-                )}
-              </View>
-              <View style={styles.priceRow}>
-                <Text style={styles.priceAmount}>$29</Text>
-                <Text style={styles.priceUnit}>once</Text>
-              </View>
-              <Text style={styles.planDesc}>
-                Pay once. Own Premium forever. No renewals, no surprises.
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.planCard, selectedPlan === 'monthly' && styles.planCardSelected]}
-              onPress={() => {
-                haptic();
-                setSelectedPlan('monthly');
-              }}
-              activeOpacity={0.85}
-              testID="premium-plan-monthly"
-            >
-              <View style={styles.planTop}>
-                <Text style={styles.planName}>Monthly</Text>
-                {selectedPlan === 'monthly' && (
-                  <View style={styles.checkDot}>
-                    <Check size={14} color={theme.colors.brandOn} strokeWidth={3} />
-                  </View>
-                )}
-              </View>
-              <View style={styles.priceRow}>
-                <Text style={styles.priceAmount}>$9.99</Text>
-                <Text style={styles.priceUnit}>/ month</Text>
-              </View>
-              <Text style={styles.planDesc}>
-                Flexible. Cancel anytime from Stripe billing.
-              </Text>
-            </TouchableOpacity>
-          </View>
+                  <Text style={styles.planDesc}>
+                    {plan.interval
+                      ? 'Renews automatically. Cancel anytime — you keep access until the end of the period you paid for.'
+                      : 'Pay once. Own Premium forever. No renewals, no surprises.'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
 
           {error ? (
             <View style={styles.errorBox}>
@@ -250,9 +284,9 @@ export default function PremiumScreen() {
         {/* Sticky CTA */}
         <View style={[styles.ctaWrap, { paddingBottom: insets.bottom + 20 }]}>
           <TouchableOpacity
-            style={[styles.cta, loading && styles.ctaDisabled]}
+            style={[styles.cta, (loading || !plans?.length) && styles.ctaDisabled]}
             onPress={startCheckout}
-            disabled={loading}
+            disabled={loading || !plans?.length}
             activeOpacity={0.9}
             testID="premium-checkout-btn"
           >
@@ -262,7 +296,13 @@ export default function PremiumScreen() {
               <>
                 <Zap size={18} color={theme.colors.brandOn} strokeWidth={2.5} fill={theme.colors.brandOn} />
                 <Text style={styles.ctaText}>
-                  {selectedPlan === 'lifetime' ? 'Unlock Lifetime — $29' : 'Subscribe — $9.99/mo'}
+                  {(() => {
+                    const plan = planById(selectedPlan);
+                    if (!plan) return 'Unlock Premium';
+                    return plan.interval
+                      ? `Subscribe — ${priceLabel(plan)}/${plan.interval}`
+                      : `Unlock Lifetime — ${priceLabel(plan)}`;
+                  })()}
                 </Text>
               </>
             )}
@@ -383,6 +423,9 @@ const styles = StyleSheet.create({
   },
   plans: {
     gap: theme.spacing.md,
+  },
+  plansLoading: {
+    paddingVertical: theme.spacing.xl,
   },
   planCard: {
     padding: theme.spacing.lg,

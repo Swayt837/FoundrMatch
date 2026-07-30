@@ -32,10 +32,15 @@ from auth import (
 )
 from ai_service import ai_service, TextDelta, StreamDone
 from compatibility import dimension_breakdown, score_compatibility
-from premium import router as premium_router, webhook_router as premium_webhook_router
+from premium import (
+    router as premium_router,
+    webhook_router as premium_webhook_router,
+    require_premium,
+)
 from account import router as account_router
 from moderation import blocked_user_ids, assert_not_blocked
 from quotas import claim_daily_swipe
+from entitlements import FREE_MAX_MATCHES, premium_active
 import gamification
 from serializers import public_user, private_user, PUBLIC_USER_PROJECTION
 from rate_limit import RateLimiter
@@ -514,6 +519,22 @@ async def swipe(
         })
         
         if reciprocal:
+            # Free tier is capped at FREE_MAX_MATCHES concurrent matches (PRD).
+            # Checked at match time rather than at swipe time so the swipe still
+            # counts and the pairing completes as soon as they upgrade or unmatch.
+            if not premium_active(current_user):
+                existing_matches = await matches_collection.count_documents({
+                    "$or": [{"user1_id": user_id}, {"user2_id": user_id}]
+                })
+                if existing_matches >= FREE_MAX_MATCHES:
+                    raise HTTPException(
+                        status_code=402,
+                        detail=(
+                            f"Free accounts can hold {FREE_MAX_MATCHES} matches. "
+                            "Upgrade to Premium, or unmatch someone to make room."
+                        ),
+                    )
+
             # It's a match!
             target_user = await users_collection.find_one(
                 {"user_id": target_id},
@@ -809,7 +830,7 @@ async def send_message(
 
 # ===== DEAL ROOMS ROUTES =====
 
-@app.post("/api/deal-rooms/create")
+@app.post("/api/deal-rooms/create", dependencies=[Depends(require_premium)])
 async def create_deal_room(
     data: DealRoomCreate,
     current_user: dict = Depends(get_current_user)
@@ -1352,11 +1373,7 @@ async def get_compatibility_report(
     This is the paywall's "Deep AI compatibility report" benefit. Gated on premium
     because it is the expensive call, and cached by pair.
     """
-    if not current_user.get("premium"):
-        raise HTTPException(
-            status_code=402,
-            detail="The deep compatibility report is a Premium feature.",
-        )
+    require_premium(current_user)
 
     from database import db as mongo_db
 
@@ -1397,7 +1414,10 @@ class AICopilotRequest(BaseModel):
     history: List[Dict[str, str]] = []
 
 
-@app.post("/api/ai/copilot/chat", dependencies=[Depends(ai_rate_limit)])
+@app.post(
+    "/api/ai/copilot/chat",
+    dependencies=[Depends(ai_rate_limit), Depends(require_premium)],
+)
 async def copilot_chat(
     payload: AICopilotRequest,
     current_user: dict = Depends(get_current_user)

@@ -312,6 +312,16 @@ class APIClient {
     return this.request('/premium/me');
   }
 
+  /** Purchasable plans. Prices and availability are server-side, never hardcoded. */
+  async getPremiumPlans() {
+    return this.request('/premium/plans');
+  }
+
+  /** Cancel a subscription at the end of the paid period. */
+  async cancelSubscription() {
+    return this.request('/premium/cancel', { method: 'POST' });
+  }
+
   // Discovery / Projects with filters
   async getDiscoveryCardsFiltered(params: {
     limit?: number;

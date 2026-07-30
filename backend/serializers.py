@@ -7,6 +7,8 @@ email address, internal settings and swipe counters to any authenticated caller.
 """
 from typing import Any, Dict, List, Optional
 
+from entitlements import premium_active
+
 
 # Projection for reads of other users: only fetch what `public_user` exposes.
 PUBLIC_USER_PROJECTION = {
@@ -19,6 +21,8 @@ PUBLIC_USER_PROJECTION = {
     "settings.show_age": 1,
     "onboarding_completed": 1,
     "last_active": 1,
+    # Needed to tell an active subscription from a lapsed one; never exposed.
+    "premium_expires_at": 1,
 }
 
 
@@ -40,7 +44,9 @@ def public_user(user: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     return {
         "user_id": user.get("user_id"),
         "profile": profile,
-        "premium": bool(user.get("premium", False)),
+        # premium_active, not the raw flag: a lapsed subscriber must stop showing
+        # a PREMIUM badge to other founders and stop getting the discovery boost.
+        "premium": premium_active(user),
         "verification": user.get("verification") or {},
         "gamification": user.get("gamification") or {},
     }

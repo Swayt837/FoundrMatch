@@ -4,7 +4,6 @@ Free-tier usage quotas.
 Single source of truth for the daily swipe allowance, shared by `/api/swipe` and
 `/api/premium/me` — the limit used to be hardcoded in both places.
 """
-import os
 from datetime import datetime, timezone
 from typing import Any, Dict
 
@@ -12,8 +11,7 @@ from fastapi import HTTPException
 from pymongo import ReturnDocument
 
 from database import users_collection
-
-FREE_DAILY_SWIPES = int(os.getenv("FREE_DAILY_SWIPES", "10"))
+from entitlements import FREE_DAILY_SWIPES, premium_active
 
 
 def today_key() -> str:
@@ -40,7 +38,8 @@ async def claim_daily_swipe(user: Dict[str, Any]) -> int:
     read the same counter and write back the same value.
     """
     today = today_key()
-    is_premium = bool(user.get("premium", False))
+    # premium_active, not the raw flag: a lapsed subscriber is back on the free tier.
+    is_premium = premium_active(user)
 
     query: Dict[str, Any] = {"user_id": user["user_id"]}
     if not is_premium:
