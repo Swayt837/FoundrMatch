@@ -230,16 +230,41 @@ fois le premier déploiement validé, pour ne pas mélanger les causes en cas de
 
 ## Phase 3 — Brancher l'app sur le backend (~15 min)
 
-### 3.1 [TOI] Initialiser le projet EAS
+### 3.1 [TOI] Créer le compte Expo et initialiser le projet
+
+Expo est le service qui compile l'app dans le cloud (EAS Build) : pas besoin de Mac pour
+produire un `.ipa` iOS. Compte distinct d'Apple et de Google, gratuit pour démarrer.
+
+**a. Le compte** — https://expo.dev/signup
+
+Le **nom d'utilisateur est important** : il devient le propriétaire du projet
+(`@ton-pseudo/cofound`), il apparaît dans l'identité EAS et se change mal après coup.
+Choisis-le comme un identifiant durable, pas comme un pseudo jetable.
+
+Le plan gratuit suffit pour commencer. Les builds y sont mis en file d'attente derrière
+les comptes payants, donc compte un délai variable — de quelques minutes à beaucoup plus
+aux heures chargées. Tarifs à jour sur https://expo.dev/pricing.
+
+**b. La connexion en ligne de commande**
 
 ```sh
 cd frontend
-npx eas login
+npx eas login      # identifiant ou e-mail, puis mot de passe
+npx eas whoami     # doit afficher ton pseudo
+```
+
+**c. L'initialisation**
+
+```sh
 npx eas init
 ```
 
-`eas init` crée le projet côté Expo et écrit `extra.eas.projectId` dans `app.json` —
-c'est ce qui manquait pour pouvoir lancer un build. Commite le changement.
+Il propose de créer un projet nommé d'après le `slug` de `app.json` (`cofound`) —
+accepte. Les slugs sont propres à ton compte, aucun risque de collision avec un autre
+utilisateur.
+
+`eas init` écrit `extra.eas.projectId` dans `app.json`. **Commite ce changement** : c'est
+lui qui relie le dépôt au projet EAS, et sans lui aucun build ne peut démarrer.
 
 ### 3.2 ~~Reporter l'URL du backend~~ — ✅ fait
 
@@ -456,11 +481,30 @@ faux profils). Retirer les dépendances mortes (`zustand`, les deux paquets Glue
 
 ### 9.1 Build interne, pour tester sur un vrai téléphone
 
+**Commence par Android**, même si la cible principale est iOS :
+
 ```sh
 cd frontend
-npx eas build --profile preview --platform ios
 npx eas build --profile preview --platform android
 ```
+
+Le profil `preview` est en `distribution: internal`, ce qui produit pour Android un APK
+téléchargeable et installable directement depuis un lien. **Aucun identifiant Apple ni
+Google n'est nécessaire** — c'est le chemin le plus court entre ici et l'app native
+tournant sur un vrai téléphone, et le seul moyen de voir enfin les appels vidéo
+fonctionner.
+
+iOS demande davantage de préparation :
+
+```sh
+npx eas device:create              # enregistre l'UDID du ou des iPhone de test
+npx eas build --profile preview --platform ios
+```
+
+La distribution interne iOS repose sur un profil ad hoc, qui doit lister explicitement
+chaque appareil autorisé. EAS génère certificats et profils tout seul à partir de ton
+compte Apple lors du premier build — laisse-le faire plutôt que de créer quoi que ce soit
+à la main dans l'interface Apple.
 
 ⚠️ Les appels vidéo utilisent `react-native-webrtc`, un module natif : **Expo Go ne peut
 pas les exécuter**. Il faut un build de développement ou de preview pour les tester.
