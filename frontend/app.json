@@ -10,7 +10,8 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.cofound.app"
+      "bundleIdentifier": "com.cofound.app",
+      "bitcode": false
     },
     "android": {
       "adaptiveIcon": {
@@ -23,7 +24,11 @@
         "android.permission.INTERNET",
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
-        "android.permission.MODIFY_AUDIO_SETTINGS"
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.WAKE_LOCK",
+        "android.permission.BLUETOOTH"
       ]
     },
     "web": {
@@ -62,9 +67,11 @@
       "typedRoutes": true
     },
     "extra": {
+      "router": {},
       "eas": {
-        "projectId": "8eb0ef3e-51e9-415d-9ed7-fc7b5da4f702"
+        "projectId": "f42074c8-1600-4408-90ad-aa24a895ed52"
       }
-    }
+    },
+    "owner": "flo837"
   }
 }
