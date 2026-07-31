@@ -199,12 +199,18 @@ froid de ~30 secondes à la requête suivante.
 Dans les logs Render, tu dois voir `✅ Database indexes created`. Ensuite :
 
 ```sh
-curl https://cofound-api.onrender.com/api/health
+curl https://cofound-api-xjxt.onrender.com/api/health
 # {"status":"healthy","service":"CoFound API"}
 ```
 
-Note l'URL exacte que Render t'attribue — si elle diffère de `cofound-api.onrender.com`,
-il faut la reporter dans `frontend/eas.json` (trois occurrences).
+L'URL réellement attribuée est **`https://cofound-api-xjxt.onrender.com`** (Render ajoute un
+suffixe quand le nom simple est déjà pris) ; elle est déjà reportée dans `frontend/eas.json`.
+
+⚠️ L'assistant Atlas propose « Add Current IP Address », qui n'autorise que ta connexion
+domestique — Render se fait alors couper au niveau TLS, avec un
+`SSL: TLSV1_ALERT_INTERNAL_ERROR` sur les trois nœuds du réplica et jamais de message
+d'authentification. C'est bien l'étape 1.3 (`0.0.0.0/0`) qu'il faut, et le symptôme ne
+ressemble pas du tout à un problème de liste d'accès.
 
 Puis, dans **Shell** sur le tableau de bord Render, crée des profils à swiper :
 
@@ -235,17 +241,17 @@ npx eas init
 `eas init` crée le projet côté Expo et écrit `extra.eas.projectId` dans `app.json` —
 c'est ce qui manquait pour pouvoir lancer un build. Commite le changement.
 
-### 3.2 [TOI] Vérifier l'URL du backend
+### 3.2 ~~Reporter l'URL du backend~~ — ✅ fait
 
-Si Render t'a donné une autre URL qu'attendu, remplace-la dans `frontend/eas.json`
-(profils `preview` et `production`).
+`frontend/eas.json` pointe sur `https://cofound-api-xjxt.onrender.com` dans les profils
+`preview` et `production`.
 
 ### 3.3 [TOI] Tester en local contre la production
 
 ```sh
 cd frontend
 cp .env.example .env
-# mets EXPO_PUBLIC_BACKEND_URL=https://cofound-api.onrender.com
+# mets EXPO_PUBLIC_BACKEND_URL=https://cofound-api-xjxt.onrender.com
 yarn install
 yarn start
 ```

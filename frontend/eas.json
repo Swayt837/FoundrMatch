@@ -15,7 +15,7 @@
       "distribution": "internal",
       "channel": "preview",
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://cofound-api.onrender.com",
+        "EXPO_PUBLIC_BACKEND_URL": "https://cofound-api-xjxt.onrender.com",
         "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "",
         "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "",
         "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": ""
@@ -25,7 +25,7 @@
       "autoIncrement": true,
       "channel": "production",
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://cofound-api.onrender.com",
+        "EXPO_PUBLIC_BACKEND_URL": "https://cofound-api-xjxt.onrender.com",
         "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "",
         "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "",
         "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": ""
