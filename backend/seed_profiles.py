@@ -1,6 +1,13 @@
 """
-Seed demo founder profiles for Discover screen
-Run: python /app/backend/seed_profiles.py
+Seed demo founder profiles for the Discover screen.
+
+Run: SEED_PASSWORD=... python backend/seed_profiles.py
+
+The password comes from the environment and has no default. It used to be the
+literal "demo123", written here in a public repository — which meant that once
+the backend was deployed, anyone reading this file could sign in as any of the
+eight demo founders. Re-running the script now also rotates the password on
+accounts that already exist, so a leaked one can actually be replaced.
 """
 import asyncio
 import sys
@@ -8,7 +15,29 @@ import os
 sys.path.insert(0, os.path.dirname(__file__))
 
 from database import users_collection, get_utc_now, generate_user_id
-from auth import get_password_hash
+from auth import get_password_hash, MIN_PASSWORD_LENGTH
+
+
+def seed_password() -> str:
+    """
+    The password every demo account gets.
+
+    Deliberately has no fallback: a default in this file is published the moment
+    it is committed, and these accounts live on an internet-facing backend.
+    """
+    password = os.getenv("SEED_PASSWORD", "")
+    if not password:
+        raise SystemExit(
+            "SEED_PASSWORD is not set, and there is no default — this file is public.\n"
+            "Generate one with:\n"
+            '  python -c "import secrets; print(secrets.token_urlsafe(18))"'
+        )
+    if len(password) < MIN_PASSWORD_LENGTH:
+        raise SystemExit(
+            f"SEED_PASSWORD must be at least {MIN_PASSWORD_LENGTH} characters "
+            "— the API rejects anything shorter, so these accounts could not log in."
+        )
+    return password
 
 
 SEED_PROFILES = [
@@ -104,18 +133,29 @@ SEED_PROFILES = [
 
 
 async def seed():
+    password = seed_password()
     print("Seeding demo profiles...")
     for p in SEED_PROFILES:
         existing = await users_collection.find_one({"email": p["email"]})
         if existing:
-            print(f"  Skipping {p['name']} - already exists")
+            # Rotate rather than skip. Re-running this against a deployment whose
+            # password has leaked is the only way to replace it, and skipping made
+            # that impossible without editing the database by hand.
+            await users_collection.update_one(
+                {"email": p["email"]},
+                {"$set": {
+                    "password_hash": get_password_hash(password),
+                    "updated_at": get_utc_now(),
+                }},
+            )
+            print(f"  Rotated password for {p['name']}")
             continue
 
         user_id = await generate_user_id()
         new_user = {
             "user_id": user_id,
             "email": p["email"],
-            "password_hash": get_password_hash("demo123"),
+            "password_hash": get_password_hash(password),
             "profile": {
                 "name": p["name"],
                 "photos": [p["photo"]],

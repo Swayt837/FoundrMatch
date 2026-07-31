@@ -42,6 +42,12 @@ services:
       - key: GOOGLE_CLIENT_IDS
         sync: false
 
+      # Password for the eight demo founders created by seed_profiles.py. No
+      # default anywhere: the script is in a public repository, so a hardcoded
+      # one is a published credential on a live backend.
+      - key: SEED_PASSWORD
+        sync: false
+
       # --- Claude ---
       - key: ANTHROPIC_API_KEY
         sync: false
