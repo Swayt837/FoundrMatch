@@ -18,6 +18,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router';
 import { ArrowLeft, ArrowRight, Check, Camera, X } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { storablePhoto } from '@/src/utils/photos';
 import * as Haptics from 'expo-haptics';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { api } from '@/src/api/client';
@@ -167,9 +168,12 @@ export default function OnboardingScreen() {
       base64: true,
     });
 
-    if (!result.canceled && result.assets[0].base64) {
-      setPhotos([...photos, `data:image/jpeg;base64,${result.assets[0].base64}`]);
-    }
+    if (result.canceled) return;
+
+    // Uploads to object storage when it is available, and falls back to an
+    // inline data URI when it is not — see src/utils/photos.ts.
+    const stored = await storablePhoto(result.assets[0]);
+    if (stored) setPhotos([...photos, stored]);
   };
 
   const validateStep = (): string => {

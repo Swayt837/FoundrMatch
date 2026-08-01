@@ -159,6 +159,23 @@ class APIClient {
     });
   }
 
+  /**
+   * Authorise one image upload and get the URL to PUT it to.
+   *
+   * 503 here means the server has no object storage configured; callers treat
+   * that as "store the image inline instead" rather than as a failure.
+   */
+  async createPhotoUpload(contentType: string) {
+    return this.request('/uploads/photo', {
+      method: 'POST',
+      body: JSON.stringify({ content_type: contentType }),
+    });
+  }
+
+  async uploadConfig() {
+    return this.request('/uploads/config');
+  }
+
   async uploadPhotos(photos: string[]) {
     // Wrapped in an object: the endpoint expects a JSON body `{ photos: [...] }`.
     return this.request('/profile/photos', {
