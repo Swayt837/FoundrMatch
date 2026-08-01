@@ -48,7 +48,7 @@ const AVAILABILITY_OPTIONS = [
   { value: 'immediate', label: 'Immediately available' },
 ];
 
-const BUDGETS = ['Bootstrap only', '€1,000', '€5,000', '€20,000', '€50,000+'];
+const BUDGETS = ['Bootstrap only', 'â‚¬1,000', 'â‚¬5,000', 'â‚¬20,000', 'â‚¬50,000+'];
 
 const OBJECTIVES = [
   'SaaS', 'Mobile app', 'Agency', 'Brand', 'Marketplace',
@@ -164,14 +164,13 @@ export default function OnboardingScreen() {
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [3, 4],
-      quality: 0.5,
-      base64: true,
+      quality: 1,
     });
 
     if (result.canceled) return;
 
     // Uploads to object storage when it is available, and falls back to an
-    // inline data URI when it is not — see src/utils/photos.ts.
+    // inline data URI when it is not â€” see src/utils/photos.ts.
     const stored = await storablePhoto(result.assets[0]);
     if (stored) setPhotos([...photos, stored]);
   };

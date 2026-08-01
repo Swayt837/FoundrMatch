@@ -56,13 +56,12 @@ export default function ProfileEditScreen() {
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [3, 4],
-      quality: 0.5,
-      base64: true,
+      quality: 1,
     });
     if (result.canceled) return;
 
     // Uploads to object storage when it is available, and falls back to an
-    // inline data URI when it is not — see src/utils/photos.ts.
+    // inline data URI when it is not â€” see src/utils/photos.ts.
     const stored = await storablePhoto(result.assets[0]);
     if (stored) setPhotos([...photos, stored]);
   };
