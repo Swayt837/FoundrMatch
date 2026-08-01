@@ -204,6 +204,69 @@ def delete(key: str) -> None:
         pass
 
 
+def _client_for(endpoint_url: str):
+    """A throwaway client bound to one endpoint, for probing."""
+    return boto3.client(
+        "s3",
+        endpoint_url=endpoint_url,
+        aws_access_key_id=R2_ACCESS_KEY_ID,
+        aws_secret_access_key=R2_SECRET_ACCESS_KEY,
+        region_name="auto",
+        config=Config(signature_version="s3v4", retries={"max_attempts": 1}),
+    )
+
+
+def _candidate_endpoints() -> list:
+    """
+    The endpoint in use, plus the other one it is most often confused with.
+
+    R2 has two distinct concepts that both sound like "put my data in Europe".
+    A *location hint* (weur, eeur, …) only nudges where objects live and leaves
+    the bucket on the default hostname. A *jurisdiction* (eu) is a separate
+    namespace with its own hostname and its own API tokens. Picking the hint but
+    configuring the jurisdiction endpoint yields AccessDenied — valid key, valid
+    signature, wrong namespace — so both are worth probing before blaming
+    permissions.
+    """
+    default = f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+    eu = f"https://{R2_ACCOUNT_ID}.eu.r2.cloudflarestorage.com"
+    current = endpoint()
+    return [current] + [e for e in (default, eu) if e != current]
+
+
+def _probe(endpoint_url: str) -> Dict[str, object]:
+    """Write, head and delete one object through `endpoint_url`."""
+    key = f"selftest/{uuid.uuid4().hex}.txt"
+    probe_client = _client_for(endpoint_url)
+    try:
+        probe_client.put_object(
+            Bucket=R2_BUCKET, Key=key, Body=b"ok", ContentType="text/plain"
+        )
+    except ClientError as exc:
+        error = exc.response.get("Error", {})
+        return {
+            "endpoint": endpoint_url,
+            "write": "failed",
+            "error_code": error.get("Code"),
+            "error_message": error.get("Message"),
+        }
+    except BotoCoreError as exc:
+        return {"endpoint": endpoint_url, "write": "failed", "error_message": str(exc)}
+
+    try:
+        probe_client.head_object(Bucket=R2_BUCKET, Key=key)
+        read = "ok"
+    except (BotoCoreError, ClientError) as exc:
+        read = f"failed: {exc}"
+
+    try:
+        probe_client.delete_object(Bucket=R2_BUCKET, Key=key)
+    except (BotoCoreError, ClientError):
+        pass
+
+    return {"endpoint": endpoint_url, "write": "ok", "read": read}
+
+
 def diagnose() -> Dict[str, object]:
     """
     Write, read back and delete one small object, reporting exactly what R2 said.
@@ -234,30 +297,27 @@ def diagnose() -> Dict[str, object]:
         report["missing"] = missing_settings()
         return report
 
-    key = f"selftest/{uuid.uuid4().hex}.txt"
-    try:
-        client().put_object(
-            Bucket=R2_BUCKET, Key=key, Body=b"ok", ContentType="text/plain"
+    # Every candidate is probed even when the first succeeds: knowing that only
+    # one of them works is what identifies a hint/jurisdiction mix-up, and the
+    # objects are two bytes each.
+    attempts = [_probe(url) for url in _candidate_endpoints()]
+    report["attempts"] = attempts
+
+    working = [a["endpoint"] for a in attempts if a.get("write") == "ok"]
+    report["write"] = "ok" if working else "failed"
+
+    if working and working[0] != endpoint():
+        report["fix"] = (
+            f"Set R2_ENDPOINT={working[0]} — the configured endpoint is not the "
+            "one this bucket answers on."
         )
-        report["write"] = "ok"
-    except ClientError as exc:
-        report["write"] = "failed"
-        report["error_code"] = exc.response.get("Error", {}).get("Code")
-        report["error_message"] = exc.response.get("Error", {}).get("Message")
-        return report
-    except BotoCoreError as exc:
-        report["write"] = "failed"
-        report["error_message"] = str(exc)
-        return report
+    elif not working:
+        report["fix"] = (
+            "No endpoint accepted a write. The key and signature are accepted "
+            "where the error is AccessDenied, so check that the API token grants "
+            "Object Read & Write on this bucket."
+        )
 
-    try:
-        client().head_object(Bucket=R2_BUCKET, Key=key)
-        report["read"] = "ok"
-    except (BotoCoreError, ClientError) as exc:
-        report["read"] = f"failed: {exc}"
-
-    delete(key)
-    report["cleaned_up"] = True
     return report
 
 
