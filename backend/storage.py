@@ -34,6 +34,13 @@ R2_BUCKET = os.getenv("R2_BUCKET", "")
 # Public origin the bucket is served from, e.g. https://cdn.example.com
 R2_PUBLIC_BASE_URL = os.getenv("R2_PUBLIC_BASE_URL", "").rstrip("/")
 
+# Optional override for the S3 endpoint. A bucket created under the EU
+# jurisdiction — which is what keeps its objects inside the EU, and is chosen
+# once at creation and never afterwards — is not reachable at the default
+# hostname: it answers on <account>.eu.r2.cloudflarestorage.com. Signing against
+# the wrong one fails in a way that reads like bad credentials.
+R2_ENDPOINT = os.getenv("R2_ENDPOINT", "").rstrip("/")
+
 # Long enough to survive a slow mobile connection, short enough that a leaked
 # URL is worthless by the time anyone finds it.
 UPLOAD_URL_TTL = 300
@@ -80,6 +87,11 @@ def missing_settings() -> list:
 _client = None
 
 
+def endpoint() -> str:
+    """The S3 endpoint to sign against — the EU-jurisdiction one differs."""
+    return R2_ENDPOINT or f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+
+
 def client():
     """
     Cached S3 client pointed at R2.
@@ -95,7 +107,7 @@ def client():
             )
         _client = boto3.client(
             "s3",
-            endpoint_url=f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com",
+            endpoint_url=endpoint(),
             aws_access_key_id=R2_ACCESS_KEY_ID,
             aws_secret_access_key=R2_SECRET_ACCESS_KEY,
             region_name="auto",

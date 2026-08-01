@@ -61,6 +61,9 @@ services:
         sync: false
       - key: R2_PUBLIC_BASE_URL
         sync: false
+      # Only for an EU-jurisdiction bucket, which answers on a different host.
+      - key: R2_ENDPOINT
+        sync: false
 
       # --- Claude ---
       - key: ANTHROPIC_API_KEY

@@ -462,6 +462,74 @@ la vidéo (NAT symétrique, réseaux mobiles, pare-feux d'entreprise). Metered.c
 offre gratuite suffisante pour démarrer ; Twilio et Cloudflare sont les alternatives.
 Trois valeurs à renseigner sur Render : `TURN_URLS`, `TURN_USERNAME`, `TURN_CREDENTIAL`.
 
+### 8.3 bis [TOI] Configurer Cloudflare R2
+
+Le code est en place ; il attend cinq variables. Compte vingt minutes.
+
+**a. Activer R2.** dash.cloudflare.com → **R2 Object Storage** dans le menu de gauche.
+Au premier accès, Cloudflare demande d'activer le service et **une carte bancaire, même
+pour l'offre gratuite** (10 Go de stockage, 1 million d'écritures et 10 millions de
+lectures par mois). En dessous de ces seuils, rien n'est facturé — et R2 ne facture
+jamais la bande passante sortante, contrairement à S3.
+
+**b. Créer le bucket.** *Create bucket*.
+
+- Nom : `cofoundr-media` — minuscules, chiffres et tirets uniquement
+- **Location** → *Specify jurisdiction* → **European Union**
+
+⚠️ La juridiction se choisit **à la création et jamais après**. La retenir garantit que
+les objets restent physiquement dans l'UE, ce qui simplifie la conformité RGPD pour des
+photos de personnes. Conséquence technique : le bucket répond alors sur
+`https://<account_id>.eu.r2.cloudflarestorage.com` et non sur l'hôte par défaut. C'est
+à ça que sert `R2_ENDPOINT` ; l'oublier produit une erreur qui ressemble à s'y méprendre
+à des identifiants invalides.
+
+**c. Relever l'Account ID.** Sur la page R2, dans le panneau de droite. C'est aussi le
+segment qui suit `dash.cloudflare.com/` dans l'URL.
+
+**d. Créer le jeton d'API.** Page R2 → **Manage R2 API Tokens** → *Create API token*.
+
+- Permissions : **Object Read & Write**
+- *Specify bucket(s)* → uniquement `cofoundr-media`, pas « tous »
+- TTL : *Forever*
+
+Le secret ne s'affiche **qu'une fois**. Note l'*Access Key ID* et le *Secret Access Key*.
+
+**e. Rendre le bucket lisible publiquement.** Bucket → **Settings** → *Public access*.
+
+Deux voies. Le sous-domaine **r2.dev** s'active en un clic et donne une URL du type
+`https://pub-xxxx.r2.dev` : pratique pour vérifier que tout fonctionne, mais Cloudflare
+le limite en débit et **le déconseille explicitement en production**. Un **domaine
+personnalisé** est la bonne réponse à terme : *Connect Domain*, avec un domaine déjà géré
+par Cloudflare — `cdn.cofoundr.app`, ou un sous-domaine de `aaven.fr` que tu as déjà.
+
+**f. Autoriser le navigateur à envoyer.** Bucket → **Settings** → *CORS Policy* → *Add*.
+
+```json
+[
+  {
+    "AllowedOrigins": ["http://localhost:8081", "https://TON-DOMAINE-WEB"],
+    "AllowedMethods": ["PUT"],
+    "AllowedHeaders": ["content-type"],
+    "MaxAgeSeconds": 3600
+  }
+]
+```
+
+Sans cette règle, l'envoi de photo échoue **uniquement depuis la version web** — iOS et
+Android ne sont pas soumis au CORS. C'est le genre de panne qui ne se manifeste que chez
+une partie des utilisateurs.
+
+**g. Renseigner Render.** Environment → les cinq variables, plus `R2_ENDPOINT` si tu as
+choisi la juridiction UE. Puis *Manual Deploy*.
+
+**h. Migrer les photos existantes.** Render → Shell :
+
+```sh
+python migrate_photos_to_r2.py            # simulation, n'ecrit rien
+python migrate_photos_to_r2.py --apply    # migration reelle
+```
+
 ### 8.3 [MOI] Photos en stockage objet
 
 Les photos sont stockées en base64 dans les documents MongoDB. Ça fonctionne, mais chaque

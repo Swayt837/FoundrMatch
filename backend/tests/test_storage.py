@@ -126,3 +126,11 @@ def test_storage_urls_do_not_count_towards_the_inline_cap(configured):
 def test_more_than_five_photos_is_refused(configured):
     with pytest.raises(ValidationError):
         PhotosUpload(photos=[f"{BASE}/profiles/u/{i}.jpg" for i in range(6)])
+
+def test_endpoint_defaults_to_the_global_hostname(configured):
+    assert storage.endpoint() == "https://acct.r2.cloudflarestorage.com"
+
+
+def test_endpoint_override_wins(monkeypatch, configured):
+    monkeypatch.setattr(storage, "R2_ENDPOINT", "https://acct.eu.r2.cloudflarestorage.com")
+    assert storage.endpoint() == "https://acct.eu.r2.cloudflarestorage.com"
