@@ -27,19 +27,22 @@ import boto3
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
-R2_ACCOUNT_ID = os.getenv("R2_ACCOUNT_ID", "")
-R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID", "")
-R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY", "")
-R2_BUCKET = os.getenv("R2_BUCKET", "")
+# Stripped, all of them. A secret pasted into a dashboard field arrives with a
+# trailing newline often enough to be worth defending against, and the resulting
+# signature mismatch surfaces as a bare 403 with nothing pointing at whitespace.
+R2_ACCOUNT_ID = os.getenv("R2_ACCOUNT_ID", "").strip()
+R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID", "").strip()
+R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY", "").strip()
+R2_BUCKET = os.getenv("R2_BUCKET", "").strip()
 # Public origin the bucket is served from, e.g. https://cdn.example.com
-R2_PUBLIC_BASE_URL = os.getenv("R2_PUBLIC_BASE_URL", "").rstrip("/")
+R2_PUBLIC_BASE_URL = os.getenv("R2_PUBLIC_BASE_URL", "").strip().rstrip("/")
 
 # Optional override for the S3 endpoint. A bucket created under the EU
 # jurisdiction — which is what keeps its objects inside the EU, and is chosen
 # once at creation and never afterwards — is not reachable at the default
 # hostname: it answers on <account>.eu.r2.cloudflarestorage.com. Signing against
 # the wrong one fails in a way that reads like bad credentials.
-R2_ENDPOINT = os.getenv("R2_ENDPOINT", "").rstrip("/")
+R2_ENDPOINT = os.getenv("R2_ENDPOINT", "").strip().rstrip("/")
 
 # Long enough to survive a slow mobile connection, short enough that a leaked
 # URL is worthless by the time anyone finds it.
@@ -199,6 +202,63 @@ def delete(key: str) -> None:
         client().delete_object(Bucket=R2_BUCKET, Key=key)
     except (BotoCoreError, ClientError):
         pass
+
+
+def diagnose() -> Dict[str, object]:
+    """
+    Write, read back and delete one small object, reporting exactly what R2 said.
+
+    A presigned upload that fails gives the client a bare `403 AccessDenied`,
+    which is the same answer for a wrong key, a wrong secret, a missing
+    permission and a bucket that is not there. Going through the SDK
+    server-side surfaces the actual error code, which distinguishes them:
+
+        InvalidAccessKeyId    -> R2_ACCESS_KEY_ID is wrong
+        SignatureDoesNotMatch -> R2_SECRET_ACCESS_KEY is wrong
+        AccessDenied          -> the token lacks write on this bucket,
+                                 or belongs to another jurisdiction
+        NoSuchBucket          -> R2_BUCKET is wrong, or invisible from
+                                 this endpoint
+    """
+    report: Dict[str, object] = {
+        "configured": configured(),
+        "endpoint": endpoint(),
+        "bucket": R2_BUCKET,
+        "public_base_url": R2_PUBLIC_BASE_URL,
+        "access_key_id": R2_ACCESS_KEY_ID[:6] + "..." if R2_ACCESS_KEY_ID else "",
+        # Length is the cheapest way to spot a pasted token value or a stray
+        # newline without ever echoing the secret itself.
+        "secret_length": len(R2_SECRET_ACCESS_KEY),
+    }
+    if not configured():
+        report["missing"] = missing_settings()
+        return report
+
+    key = f"selftest/{uuid.uuid4().hex}.txt"
+    try:
+        client().put_object(
+            Bucket=R2_BUCKET, Key=key, Body=b"ok", ContentType="text/plain"
+        )
+        report["write"] = "ok"
+    except ClientError as exc:
+        report["write"] = "failed"
+        report["error_code"] = exc.response.get("Error", {}).get("Code")
+        report["error_message"] = exc.response.get("Error", {}).get("Message")
+        return report
+    except BotoCoreError as exc:
+        report["write"] = "failed"
+        report["error_message"] = str(exc)
+        return report
+
+    try:
+        client().head_object(Bucket=R2_BUCKET, Key=key)
+        report["read"] = "ok"
+    except (BotoCoreError, ClientError) as exc:
+        report["read"] = f"failed: {exc}"
+
+    delete(key)
+    report["cleaned_up"] = True
+    return report
 
 
 def key_of(url: str) -> Optional[str]:

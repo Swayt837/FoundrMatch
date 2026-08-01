@@ -63,6 +63,26 @@ async def create_photo_upload(
         raise HTTPException(status_code=status, detail=str(exc))
 
 
+@router.post(
+    "/uploads/selftest",
+    dependencies=[Depends(RateLimiter("uploads_selftest", limit=6, window=300))],
+)
+async def uploads_selftest(current_user: dict = Depends(get_current_user)):
+    """
+    Prove the storage credentials work, and say precisely why if they do not.
+
+    A failed presigned upload reaches the client as a bare 403, which is the
+    same response for a wrong key, a wrong secret, a missing permission and a
+    bucket that isn't there. This performs the same operation through the SDK,
+    where R2 returns a specific error code.
+
+    Writes and immediately deletes a two-byte object. No secret is echoed —
+    only the length of the configured one, which is enough to spot a pasted
+    token value or a stray newline.
+    """
+    return storage.diagnose()
+
+
 @router.get("/uploads/config")
 async def upload_config(current_user: dict = Depends(get_current_user)):
     """
