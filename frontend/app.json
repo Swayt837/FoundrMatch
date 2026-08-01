@@ -1,4 +1,4 @@
-{
+﻿{
   "expo": {
     "name": "CoFound",
     "slug": "cofound",
@@ -10,7 +10,7 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.cofound.app",
+      "bundleIdentifier": "fr.boutot.cofound",
       "bitcode": false,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
@@ -22,7 +22,7 @@
         "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.cofound.app",
+      "package": "fr.boutot.cofound",
       "permissions": [
         "android.permission.INTERNET",
         "android.permission.CAMERA",
