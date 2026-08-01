@@ -16,7 +16,7 @@
 import type { ImagePickerAsset } from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { api } from '@/src/api/client';
-import { putImage } from '@/src/utils/uploads';
+import { putFile } from '@/src/utils/uploads';
 
 /** Wide enough for a full-bleed card on any current phone, at a fraction of the bytes. */
 const MAX_WIDTH = 1080;
@@ -60,7 +60,7 @@ export async function storablePhoto(asset: ImagePickerAsset): Promise<string | n
 
   try {
     const { upload_url, public_url } = await api.createPhotoUpload('image/jpeg');
-    await putImage(upload_url, prepared.uri, 'image/jpeg');
+    await putFile(upload_url, prepared.uri, 'image/jpeg');
     return public_url;
   } catch (error) {
     // Expected when the deployment has no bucket configured; worth a line

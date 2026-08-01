@@ -4,9 +4,10 @@
  *
  * The last three complete the PRD's workspace. They are not three more note lists:
  *
- * - **Documents** are links out to where the work actually lives (Drive, Notion,
- *   Figma). There is no object storage here, and base64-ing a deck into the room
- *   document is how you hit MongoDB's 16 MB limit.
+ * - **Documents** are links or uploaded files. A deck living in Drive is better
+ *   linked than copied — the copy goes stale — but the signed agreement belongs to
+ *   the pair, not to one founder's Drive. Uploads open through a short-lived signed
+ *   URL rather than a public address, because that is what they are.
  * - **Decisions** and **Equity** both require sign-off from both founders, which is
  *   the whole point: a decision log neither party agreed to proves nothing, and an
  *   equity split that does not add up to 100% is worse than no split at all. The
@@ -22,10 +23,13 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ArrowLeft, Plus, Check, Target, ListChecks, Route,
   Sparkles, Milestone, TrendingUp, FileText, Gavel, PieChart,
-  ExternalLink, Trash2, Clock3,
+  ExternalLink,
+  Upload,
+  Download, Trash2, Clock3,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
-import { ApiError } from '@/src/api/client';
+import { api, ApiError } from '@/src/api/client';
+import { formatSize } from '@/src/utils/documents';
 import { useDealRoom, useDealRoomActions } from '@/src/api/queries';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { theme } from '@/src/theme';
@@ -54,6 +58,7 @@ export default function DealRoomScreen() {
   const [docTitle, setDocTitle] = useState('');
   const [docUrl, setDocUrl] = useState('');
   const [docType, setDocType] = useState('other');
+  const [uploading, setUploading] = useState(false);
   const [decisionTitle, setDecisionTitle] = useState('');
   const [decisionDetail, setDecisionDetail] = useState('');
   const [myShare, setMyShare] = useState<string | null>(null);
@@ -168,11 +173,48 @@ export default function DealRoomScreen() {
     );
   };
 
-  const openDocument = (url: string) => {
+  const uploadDocument = () => {
+    if (!room) return;
+    haptic();
+    setError(null);
+    setUploading(true);
+    actions.uploadDocument.mutate(
+      { title: docTitle, doc_type: docType },
+      {
+        onSuccess: (created: any) => {
+          // null means the picker was dismissed — not worth clearing the form for.
+          if (created) {
+            setDocTitle('');
+            setDocType('other');
+          }
+        },
+        onError: (e: any) => setError(e?.message || 'Could not upload that file'),
+        onSettled: () => setUploading(false),
+      }
+    );
+  };
+
+  /**
+   * Links open directly; uploaded files are fetched through a short-lived signed
+   * URL, because room documents deliberately have no public address.
+   */
+  const openDocument = async (doc: any) => {
+    setError(null);
+
+    if (doc.kind === 'file') {
+      try {
+        const { url } = await api.getDocumentDownloadUrl(room.room_id, doc.document_id);
+        await Linking.openURL(url);
+      } catch {
+        setError('Could not open that document');
+      }
+      return;
+    }
+
     // Never rendered as a raw anchor: the server only stores http(s) links, and
     // this keeps the same guarantee on the client.
-    if (!/^https?:\/\//i.test(url)) return;
-    Linking.openURL(url).catch(() => setError('Could not open that link'));
+    if (!/^https?:\/\//i.test(doc.url)) return;
+    Linking.openURL(doc.url).catch(() => setError('Could not open that link'));
   };
 
   const addDecision = () => {
@@ -532,8 +574,26 @@ export default function DealRoomScreen() {
                   </>
                 )}
               </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.secondaryBtn, uploading && styles.buttonDisabled]}
+                onPress={uploadDocument}
+                disabled={uploading}
+                testID="dealroom-upload-doc"
+              >
+                {uploading ? (
+                  <ActivityIndicator color={theme.colors.brand} />
+                ) : (
+                  <>
+                    <Upload size={16} color={theme.colors.brand} strokeWidth={2} />
+                    <Text style={styles.secondaryBtnText}>Upload a file</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+
               <Text style={styles.hint}>
-                Links only — keep the file itself in Drive, Notion or Figma.
+                Link what lives elsewhere; upload what belongs to the two of you —
+                the signed agreement, not the deck.
               </Text>
             </View>
 
@@ -549,7 +609,7 @@ export default function DealRoomScreen() {
                   <View key={doc.document_id} style={styles.rowCard}>
                     <TouchableOpacity
                       style={styles.rowMain}
-                      onPress={() => openDocument(doc.url)}
+                      onPress={() => openDocument(doc)}
                       activeOpacity={0.7}
                       testID={`dealroom-doc-${doc.document_id}`}
                     >
@@ -557,10 +617,18 @@ export default function DealRoomScreen() {
                       <View style={styles.flex}>
                         <Text style={styles.rowTitle}>{doc.title}</Text>
                         <Text style={styles.rowMeta} numberOfLines={1}>
-                          {nameOf(doc.added_by)} · {doc.url}
+                          {doc.kind === 'file'
+                            ? `${nameOf(doc.added_by)} · ${doc.filename}${
+                                doc.size_bytes ? ` · ${formatSize(doc.size_bytes)}` : ''
+                              }`
+                            : `${nameOf(doc.added_by)} · ${doc.url}`}
                         </Text>
                       </View>
-                      <ExternalLink size={14} color={theme.colors.textSecondary} strokeWidth={1.75} />
+                      {doc.kind === 'file' ? (
+                        <Download size={14} color={theme.colors.textSecondary} strokeWidth={1.75} />
+                      ) : (
+                        <ExternalLink size={14} color={theme.colors.textSecondary} strokeWidth={1.75} />
+                      )}
                     </TouchableOpacity>
                     <TouchableOpacity
                       onPress={() =>

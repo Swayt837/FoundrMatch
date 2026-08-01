@@ -1,12 +1,12 @@
 /**
- * Send an image to a presigned storage URL — web implementation.
+ * Send a local file to a presigned storage URL — web implementation.
  *
  * expo-file-system has no browser implementation, so this file is resolved
  * instead by Metro's platform extensions. On web the picker returns a blob or
  * data URL that `fetch` can read directly, so the round trip is just: read it
  * back as a Blob, PUT it.
  */
-export async function putImage(
+export async function putFile(
   uploadUrl: string,
   localUri: string,
   contentType: string

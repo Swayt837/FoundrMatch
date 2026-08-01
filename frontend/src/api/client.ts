@@ -165,6 +165,24 @@ class APIClient {
    * 503 here means the server has no object storage configured; callers treat
    * that as "store the image inline instead" rather than as a failure.
    */
+  /** Authorise a document upload into a room, and get the URL to PUT it to. */
+  async createDocumentUpload(roomId: string, filename: string, contentType: string) {
+    return this.request(`/deal-rooms/${roomId}/documents/upload-url`, {
+      method: 'POST',
+      body: JSON.stringify({ filename, content_type: contentType }),
+    });
+  }
+
+  /**
+   * A short-lived URL for reading an uploaded document.
+   *
+   * Room documents have no public link on purpose — they are the agreements a
+   * pair is negotiating — so every read is authorised server-side first.
+   */
+  async getDocumentDownloadUrl(roomId: string, documentId: string) {
+    return this.request(`/deal-rooms/${roomId}/documents/${documentId}/download`);
+  }
+
   async createPhotoUpload(contentType: string) {
     return this.request('/uploads/photo', {
       method: 'POST',
@@ -256,9 +274,21 @@ class APIClient {
     });
   }
 
+  /**
+   * Attach a document. Exactly one of `url` (a link) or `storage_key` (a file
+   * already uploaded through createDocumentUpload) — the server rejects both.
+   */
   async addDealRoomDocument(
     roomId: string,
-    document: { title: string; url: string; doc_type?: string; note?: string }
+    document: {
+      title: string;
+      url?: string;
+      storage_key?: string;
+      filename?: string;
+      size_bytes?: number;
+      doc_type?: string;
+      note?: string;
+    }
   ) {
     return this.request(`/deal-rooms/${roomId}/documents`, {
       method: 'POST',

@@ -17,6 +17,7 @@ import {
 } from '@tanstack/react-query';
 
 import { api } from '@/src/api/client';
+import { pickAndUploadDocument } from '@/src/utils/documents';
 
 /**
  * Query keys in one place so an invalidation can never miss a screen by typo.
@@ -248,8 +249,34 @@ export function useDealRoomActions(matchId: string, roomId?: string) {
   });
 
   const addDocument = useMutation({
-    mutationFn: (document: { title: string; url: string; doc_type?: string }) =>
-      api.addDealRoomDocument(roomId as string, document),
+    mutationFn: (document: {
+      title: string;
+      url?: string;
+      storage_key?: string;
+      filename?: string;
+      size_bytes?: number;
+      doc_type?: string;
+    }) => api.addDealRoomDocument(roomId as string, document),
+    onSuccess: invalidate,
+  });
+
+  /**
+   * Pick a file, upload it, then record it — in that order, so the room never
+   * holds an entry pointing at a transfer that failed. Resolves to null when
+   * the user cancels the picker.
+   */
+  const uploadDocument = useMutation({
+    mutationFn: async (payload: { title: string; doc_type?: string }) => {
+      const picked = await pickAndUploadDocument(roomId as string);
+      if (!picked) return null;
+      return api.addDealRoomDocument(roomId as string, {
+        title: payload.title.trim() || picked.filename,
+        doc_type: payload.doc_type,
+        storage_key: picked.storage_key,
+        filename: picked.filename,
+        size_bytes: picked.size_bytes,
+      });
+    },
     onSuccess: invalidate,
   });
 
@@ -291,6 +318,7 @@ export function useDealRoomActions(matchId: string, roomId?: string) {
     toggleTask,
     generateRoadmap,
     addDocument,
+    uploadDocument,
     removeDocument,
     addDecision,
     agreeToDecision,

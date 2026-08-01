@@ -1,5 +1,5 @@
 /**
- * Send an image to a presigned storage URL — native implementation.
+ * Send a local file to a presigned storage URL — native implementation.
  *
  * `FileSystem.uploadAsync` streams the file from disk rather than reading it
  * into a JS Blob first, which is what keeps a multi-megabyte photo from being
@@ -15,7 +15,7 @@
  */
 import * as FileSystem from 'expo-file-system/legacy';
 
-export async function putImage(
+export async function putFile(
   uploadUrl: string,
   localUri: string,
   contentType: string
