@@ -248,6 +248,34 @@ export function useDealRoomActions(matchId: string, roomId?: string) {
     onSuccess: invalidate,
   });
 
+  const addObjective = useMutation({
+    mutationFn: (payload: { title: string; target_date?: string }) =>
+      api.addDealRoomObjective(roomId as string, payload),
+    onSuccess: invalidate,
+  });
+
+  const toggleObjective = useMutation({
+    mutationFn: (objectiveId: string) =>
+      api.toggleDealRoomObjective(roomId as string, objectiveId),
+    onSuccess: invalidate,
+  });
+
+  const removeObjective = useMutation({
+    mutationFn: (objectiveId: string) =>
+      api.removeDealRoomObjective(roomId as string, objectiveId),
+    onSuccess: invalidate,
+  });
+
+  const addNote = useMutation({
+    mutationFn: (content: string) => api.addDealRoomNote(roomId as string, content),
+    onSuccess: invalidate,
+  });
+
+  const removeNote = useMutation({
+    mutationFn: (noteId: string) => api.removeDealRoomNote(roomId as string, noteId),
+    onSuccess: invalidate,
+  });
+
   const addDocument = useMutation({
     mutationFn: (document: {
       title: string;
@@ -317,6 +345,11 @@ export function useDealRoomActions(matchId: string, roomId?: string) {
     addTask,
     toggleTask,
     generateRoadmap,
+    addObjective,
+    toggleObjective,
+    removeObjective,
+    addNote,
+    removeNote,
     addDocument,
     uploadDocument,
     removeDocument,

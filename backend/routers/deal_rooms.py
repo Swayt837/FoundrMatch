@@ -3,21 +3,31 @@ Deal rooms: the shared workspace a matched pair uses to start building.
 
 Creating one is a Premium feature, per the PRD.
 
-The room document has always carried `documents`, `decisions` and `equity_split`
-fields that nothing ever wrote to. The endpoints below fill them in, and the three
-have deliberately different semantics:
+The room document has always carried `objectives`, `documents`, `brainstorm_notes`,
+`decisions` and `equity_split` fields that nothing ever wrote to. The endpoints
+below fill them in, and they have deliberately different semantics — the point of
+five sections rather than one list is that they demand different levels of
+commitment:
 
 - **Documents** are links or uploaded files. Links stay because founders keep their
   deck in Drive anyway and a link never goes stale; uploads exist for what a link
   cannot carry — the signed agreement, which belongs to the pair rather than to one
   person's Drive. Uploaded files are read through short-lived signed URLs issued
   only after the caller is checked against the room, never through a public link.
+- **Objectives** are outcomes, where tasks are actions. "Ship the MVP" against
+  "write the signup screen". Without the distinction the task list becomes the only
+  view of the project, and thirty ticked boxes can coexist with no idea whether the
+  thing works.
+- **Brainstorm notes** are the least structured thing here on purpose: no status, no
+  owner, no agreement. An idea that must be filed before it can be written down
+  mostly does not get written down.
 - **Decisions** need agreement from both founders, because the point of a written
   decision log is that neither party can later claim they never signed off.
 - **Equity** needs agreement too, and is validated to sum to 100% across exactly the
   room's participants. An equity tab that lets two founders each believe they hold
   60% is worse than no equity tab.
 """
+import uuid
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
@@ -405,6 +415,153 @@ async def remove_document(
         storage.delete_document(target["storage_key"])
 
     return {"document_id": document_id, "removed": True}
+
+
+# ===== Objectives =====
+#
+# Objectives are outcomes, tasks are actions. "Ship the MVP" is an objective;
+# "write the signup screen" is a task. Keeping them apart is what stops the task
+# list from becoming the only view of the project, where thirty ticked boxes can
+# coexist with no idea whether the thing is working.
+
+class ObjectiveCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    target_date: Optional[str] = Field(default=None, max_length=40)
+
+
+@router.post("/deal-rooms/{room_id}/objectives")
+async def add_objective(
+    room_id: str,
+    objective: ObjectiveCreate,
+    current_user: dict = Depends(get_current_user),
+):
+    """Add a shared objective to the room."""
+    await require_room_participant(room_id, current_user["user_id"])
+
+    entry = {
+        "objective_id": f"obj_{uuid.uuid4().hex[:12]}",
+        "title": objective.title.strip(),
+        "target_date": (objective.target_date or "").strip() or None,
+        "achieved": False,
+        "created_by": current_user["user_id"],
+        "created_at": get_utc_now(),
+    }
+
+    await deal_rooms_collection.update_one(
+        {"room_id": room_id},
+        {"$push": {"objectives": entry}, "$set": {"updated_at": get_utc_now()}},
+    )
+    return entry
+
+
+@router.patch("/deal-rooms/{room_id}/objectives/{objective_id}")
+async def toggle_objective(
+    room_id: str,
+    objective_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Mark an objective reached, or put it back. Either founder may."""
+    room = await require_room_participant(room_id, current_user["user_id"])
+
+    objectives = room.get("objectives") or []
+    target = next((o for o in objectives if o.get("objective_id") == objective_id), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="Objective not found")
+
+    target["achieved"] = not target.get("achieved", False)
+    target["achieved_at"] = get_utc_now() if target["achieved"] else None
+
+    await _touch(room_id, objectives=objectives)
+    return target
+
+
+@router.delete("/deal-rooms/{room_id}/objectives/{objective_id}")
+async def remove_objective(
+    room_id: str,
+    objective_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    room = await require_room_participant(room_id, current_user["user_id"])
+
+    if not any(o.get("objective_id") == objective_id for o in room.get("objectives") or []):
+        raise HTTPException(status_code=404, detail="Objective not found")
+
+    await deal_rooms_collection.update_one(
+        {"room_id": room_id},
+        {
+            "$pull": {"objectives": {"objective_id": objective_id}},
+            "$set": {"updated_at": get_utc_now()},
+        },
+    )
+    return {"objective_id": objective_id, "removed": True}
+
+
+# ===== Brainstorm notes =====
+#
+# Deliberately the least structured thing in the room: no status, no agreement,
+# no assignee. Every other tab asks the founders to commit to something, and an
+# idea that has to be filed before it can be written down mostly does not get
+# written down.
+
+class NoteCreate(BaseModel):
+    content: str = Field(min_length=1, max_length=4000)
+
+
+@router.post("/deal-rooms/{room_id}/notes")
+async def add_note(
+    room_id: str,
+    note: NoteCreate,
+    current_user: dict = Depends(get_current_user),
+):
+    """Jot down an idea."""
+    await require_room_participant(room_id, current_user["user_id"])
+
+    entry = {
+        "note_id": f"note_{uuid.uuid4().hex[:12]}",
+        "content": note.content.strip(),
+        "created_by": current_user["user_id"],
+        "created_at": get_utc_now(),
+    }
+
+    await deal_rooms_collection.update_one(
+        {"room_id": room_id},
+        {"$push": {"brainstorm_notes": entry}, "$set": {"updated_at": get_utc_now()}},
+    )
+    return entry
+
+
+@router.delete("/deal-rooms/{room_id}/notes/{note_id}")
+async def remove_note(
+    room_id: str,
+    note_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Delete a note. Only its author may.
+
+    The one place in the room where that restriction applies: documents,
+    objectives and tasks are shared artefacts either founder can tidy, but a
+    half-formed idea someone wrote down is theirs to withdraw.
+    """
+    room = await require_room_participant(room_id, current_user["user_id"])
+
+    target = next(
+        (n for n in room.get("brainstorm_notes") or [] if n.get("note_id") == note_id),
+        None,
+    )
+    if not target:
+        raise HTTPException(status_code=404, detail="Note not found")
+    if target.get("created_by") != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Only the author can delete a note")
+
+    await deal_rooms_collection.update_one(
+        {"room_id": room_id},
+        {
+            "$pull": {"brainstorm_notes": {"note_id": note_id}},
+            "$set": {"updated_at": get_utc_now()},
+        },
+    )
+    return {"note_id": note_id, "removed": True}
 
 
 # ===== Decisions =====

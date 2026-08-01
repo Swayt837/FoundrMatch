@@ -274,6 +274,38 @@ class APIClient {
     });
   }
 
+  // Objectives — outcomes the pair is aiming for, as opposed to tasks.
+  async addDealRoomObjective(roomId: string, objective: { title: string; target_date?: string }) {
+    return this.request(`/deal-rooms/${roomId}/objectives`, {
+      method: 'POST',
+      body: JSON.stringify(objective),
+    });
+  }
+
+  async toggleDealRoomObjective(roomId: string, objectiveId: string) {
+    return this.request(`/deal-rooms/${roomId}/objectives/${objectiveId}`, {
+      method: 'PATCH',
+    });
+  }
+
+  async removeDealRoomObjective(roomId: string, objectiveId: string) {
+    return this.request(`/deal-rooms/${roomId}/objectives/${objectiveId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  // Brainstorm notes — the unstructured corner of the room.
+  async addDealRoomNote(roomId: string, content: string) {
+    return this.request(`/deal-rooms/${roomId}/notes`, {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    });
+  }
+
+  async removeDealRoomNote(roomId: string, noteId: string) {
+    return this.request(`/deal-rooms/${roomId}/notes/${noteId}`, { method: 'DELETE' });
+  }
+
   /**
    * Attach a document. Exactly one of `url` (a link) or `storage_key` (a file
    * already uploaded through createDocumentUpload) — the server rejects both.

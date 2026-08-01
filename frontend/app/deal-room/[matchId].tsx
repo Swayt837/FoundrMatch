@@ -59,6 +59,8 @@ export default function DealRoomScreen() {
   const [docUrl, setDocUrl] = useState('');
   const [docType, setDocType] = useState('other');
   const [uploading, setUploading] = useState(false);
+  const [newObjective, setNewObjective] = useState('');
+  const [newNote, setNewNote] = useState('');
   const [decisionTitle, setDecisionTitle] = useState('');
   const [decisionDetail, setDecisionDetail] = useState('');
   const [myShare, setMyShare] = useState<string | null>(null);
@@ -151,6 +153,31 @@ export default function DealRoomScreen() {
     setError(null);
     actions.generateRoadmap.mutate(undefined, {
       onError: fail('Roadmap generation failed'),
+    });
+  };
+
+  const addObjective = () => {
+    const title = newObjective.trim();
+    if (!title || !room) return;
+    haptic();
+    setError(null);
+    actions.addObjective.mutate(
+      { title },
+      {
+        onSuccess: () => setNewObjective(''),
+        onError: fail('Could not add the objective'),
+      }
+    );
+  };
+
+  const addNote = () => {
+    const content = newNote.trim();
+    if (!content || !room) return;
+    haptic();
+    setError(null);
+    actions.addNote.mutate(content, {
+      onSuccess: () => setNewNote(''),
+      onError: fail('Could not save the idea'),
     });
   };
 
@@ -366,6 +393,8 @@ export default function DealRoomScreen() {
   const completedCount = tasks.filter((t: any) => t.completed).length;
   const roadmap = room.roadmap || {};
   const documents = room.documents || [];
+  const objectives = room.objectives || [];
+  const notes = room.brainstorm_notes || [];
   const decisions = room.decisions || [];
 
   return (
@@ -462,6 +491,142 @@ export default function DealRoomScreen() {
                 <Text style={styles.aiDesc}>Let AI plan your first 3 months together.</Text>
               </View>
             </TouchableOpacity>
+
+            {/* Objectives: outcomes, where the Tasks tab holds actions. */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Objectives</Text>
+              <View style={styles.addRow}>
+                <TextInput
+                  style={[styles.input, styles.flex]}
+                  placeholder="What does success look like?"
+                  placeholderTextColor={theme.colors.textSecondary}
+                  value={newObjective}
+                  onChangeText={setNewObjective}
+                  onSubmitEditing={addObjective}
+                  returnKeyType="done"
+                  testID="dealroom-new-objective"
+                />
+                <TouchableOpacity
+                  style={styles.addBtn}
+                  onPress={addObjective}
+                  disabled={!newObjective.trim() || actions.addObjective.isPending}
+                  testID="dealroom-add-objective"
+                >
+                  <Plus size={18} color={theme.colors.brandOn} strokeWidth={2.5} />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {objectives.length === 0 ? (
+              <View style={styles.empty}>
+                <Text style={styles.emptyText}>
+                  No objectives yet. Two or three is plenty — they are outcomes, not tasks.
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.listGap}>
+                {objectives.map((obj: any) => (
+                  <View key={obj.objective_id} style={styles.rowCard}>
+                    <TouchableOpacity
+                      style={styles.rowMain}
+                      onPress={() =>
+                        actions.toggleObjective.mutate(obj.objective_id, {
+                          onError: fail('Could not update the objective'),
+                        })
+                      }
+                      activeOpacity={0.7}
+                      testID={`dealroom-objective-${obj.objective_id}`}
+                    >
+                      <View style={[styles.checkbox, obj.achieved && styles.checkboxDone]}>
+                        {obj.achieved && (
+                          <Check size={12} color={theme.colors.brandOn} strokeWidth={3} />
+                        )}
+                      </View>
+                      <View style={styles.flex}>
+                        <Text style={[styles.rowTitle, obj.achieved && styles.taskTextDone]}>
+                          {obj.title}
+                        </Text>
+                        <Text style={styles.rowMeta}>
+                          {nameOf(obj.created_by)}
+                          {obj.target_date ? ` · by ${obj.target_date}` : ''}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() =>
+                        actions.removeObjective.mutate(obj.objective_id, {
+                          onError: fail('Could not remove the objective'),
+                        })
+                      }
+                      style={styles.rowAction}
+                      testID={`dealroom-objective-remove-${obj.objective_id}`}
+                    >
+                      <Trash2 size={14} color={theme.colors.errorOn} strokeWidth={1.75} />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {/* Notes: no status, no owner, no agreement — on purpose. */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Ideas</Text>
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                placeholder="Anything worth remembering — no structure required."
+                placeholderTextColor={theme.colors.textSecondary}
+                value={newNote}
+                onChangeText={setNewNote}
+                multiline
+                testID="dealroom-new-note"
+              />
+              <TouchableOpacity
+                style={[
+                  styles.ctaButton,
+                  (!newNote.trim() || actions.addNote.isPending) && styles.buttonDisabled,
+                ]}
+                onPress={addNote}
+                disabled={!newNote.trim() || actions.addNote.isPending}
+                testID="dealroom-add-note"
+              >
+                {actions.addNote.isPending ? (
+                  <ActivityIndicator color={theme.colors.brandOn} />
+                ) : (
+                  <>
+                    <Plus size={16} color={theme.colors.brandOn} strokeWidth={2.5} />
+                    <Text style={styles.ctaText}>Save idea</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+
+            {notes.length > 0 && (
+              <View style={styles.listGap}>
+                {notes.map((note: any) => (
+                  <View key={note.note_id} style={styles.rowCard}>
+                    <View style={styles.rowMain}>
+                      <View style={styles.flex}>
+                        <Text style={styles.cardBody}>{note.content}</Text>
+                        <Text style={styles.rowMeta}>{nameOf(note.created_by)}</Text>
+                      </View>
+                    </View>
+                    {note.created_by === myId && (
+                      <TouchableOpacity
+                        onPress={() =>
+                          actions.removeNote.mutate(note.note_id, {
+                            onError: fail('Could not remove the note'),
+                          })
+                        }
+                        style={styles.rowAction}
+                        testID={`dealroom-note-remove-${note.note_id}`}
+                      >
+                        <Trash2 size={14} color={theme.colors.errorOn} strokeWidth={1.75} />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                ))}
+              </View>
+            )}
           </View>
         )}
 
