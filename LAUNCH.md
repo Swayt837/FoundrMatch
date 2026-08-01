@@ -474,15 +474,25 @@ jamais la bande passante sortante, contrairement à S3.
 
 **b. Créer le bucket.** *Create bucket*.
 
-- Nom : `cofoundr-media` — minuscules, chiffres et tirets uniquement
-- **Location** → *Specify jurisdiction* → **European Union**
+- Nom : `cofoundr` — minuscules, chiffres et tirets uniquement
+- **Location** : *Location hint* → **Western Europe (WEUR)**
 
-⚠️ La juridiction se choisit **à la création et jamais après**. La retenir garantit que
-les objets restent physiquement dans l'UE, ce qui simplifie la conformité RGPD pour des
-photos de personnes. Conséquence technique : le bucket répond alors sur
-`https://<account_id>.eu.r2.cloudflarestorage.com` et non sur l'hôte par défaut. C'est
-à ça que sert `R2_ENDPOINT` ; l'oublier produit une erreur qui ressemble à s'y méprendre
-à des identifiants invalides.
+⚠️ Ne pas confondre deux réglages qui sonnent pareil.
+
+Un **location hint** (`weur`, `eeur`, `enam`…) indique à Cloudflare où ranger les objets.
+Le bucket reste sur l'hôte par défaut `<account_id>.r2.cloudflarestorage.com`, et
+`R2_ENDPOINT` doit rester **vide**. C'est le choix recommandé ici.
+
+Une **juridiction** (`eu`) est un espace de noms séparé, avec son propre hôte
+`<account_id>.eu.r2.cloudflarestorage.com` **et ses propres jetons d'API**. Elle apporte
+une garantie contractuelle de résidence des données, se fige à la création du bucket, et
+impose que le jeton soit créé dans ce même contexte — un jeton ordinaire, pourtant valide
+et correctement permissionné, se voit refuser l'écriture avec un `AccessDenied` qui ne
+mentionne jamais l'endpoint. Prendre la juridiction sans y penser coûte une heure de
+recherche du côté des permissions.
+
+En cas de doute, `POST /api/uploads/selftest` teste les deux hôtes et indique lequel
+répond.
 
 **c. Relever l'Account ID.** Sur la page R2, dans le panneau de droite. C'est aussi le
 segment qui suit `dash.cloudflare.com/` dans l'URL.
@@ -520,8 +530,12 @@ Sans cette règle, l'envoi de photo échoue **uniquement depuis la version web**
 Android ne sont pas soumis au CORS. C'est le genre de panne qui ne se manifeste que chez
 une partie des utilisateurs.
 
-**g. Renseigner Render.** Environment → les cinq variables, plus `R2_ENDPOINT` si tu as
-choisi la juridiction UE. Puis *Manual Deploy*.
+**g. Renseigner Render.** Environment → les cinq variables. **Laisse `R2_ENDPOINT` vide**
+sauf bucket créé sous la juridiction UE. Puis *Manual Deploy*.
+
+Vérifie ensuite avec `POST /api/uploads/selftest`, qui écrit puis supprime un objet de
+deux octets et nomme le réglage fautif s'il y en a un — plutôt que de laisser R2 répondre
+un `403` identique pour quatre causes différentes.
 
 **h. Migrer les photos existantes.** Render → Shell :
 
