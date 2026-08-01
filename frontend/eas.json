@@ -8,7 +8,7 @@
       "developmentClient": true,
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "http://192.168.1.10:8001"
+        "EXPO_PUBLIC_BACKEND_URL": "https://cofound-api-xjxt.onrender.com"
       },
       "channel": "development"
     },
