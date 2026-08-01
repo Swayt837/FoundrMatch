@@ -1,5 +1,5 @@
 """
-Comprehensive Backend API Tests for CoFound
+Comprehensive Backend API Tests for CoFoundr
 Tests all backend endpoints with real API calls
 """
 import os

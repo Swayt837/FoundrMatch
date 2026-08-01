@@ -212,7 +212,7 @@ export function useCall({ matchId, incoming }: UseCallOptions) {
           video: media === 'video' ? { facingMode: 'user' } : false,
         });
       } catch {
-        setError('CoFound needs access to your camera and microphone to place a call.');
+        setError('CoFoundr needs access to your camera and microphone to place a call.');
         setStatus('failed');
         return null;
       }

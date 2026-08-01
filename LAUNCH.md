@@ -40,7 +40,7 @@ s'applique pas. À arbitrer maintenant, parce que ça change le calendrier de de
 
 ### 0.3 [TOI] Deux décisions produit
 
-**Le nom.** Le dépôt s'appelle FoundrMatch, l'app s'appelle CoFound partout (nom affiché,
+**Le nom.** Le dépôt s'appelle FoundrMatch, l'app s'appelle CoFoundr partout (nom affiché,
 slug, scheme, bundle `com.cofound.app`, textes de l'interface). Il faut trancher avant de
 réserver le bundle identifier : **une fois créé sur App Store Connect, il est définitif**.
 Vérifie aussi que le nom est libre sur les deux stores et à l'INPI.
@@ -200,7 +200,7 @@ Dans les logs Render, tu dois voir `✅ Database indexes created`. Ensuite :
 
 ```sh
 curl https://cofound-api-xjxt.onrender.com/api/health
-# {"status":"healthy","service":"CoFound API"}
+# {"status":"healthy","service":"CoFoundr API"}
 ```
 
 L'URL réellement attribuée est **`https://cofound-api-xjxt.onrender.com`** (Render ajoute un

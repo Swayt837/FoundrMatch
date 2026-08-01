@@ -1,16 +1,16 @@
 ﻿{
   "expo": {
-    "name": "CoFound",
+    "name": "CoFoundr",
     "slug": "cofound",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "cofound",
+    "scheme": "cofoundr",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.cofoundr.app",
+      "bundleIdentifier": "fr.boutot.cofoundr",
       "bitcode": false,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
@@ -22,7 +22,7 @@
         "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.cofoundr.app",
+      "package": "fr.boutot.cofoundr",
       "permissions": [
         "android.permission.INTERNET",
         "android.permission.CAMERA",
@@ -53,16 +53,16 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "CoFound needs access to your photos so you can add pictures to your founder profile.",
-          "cameraPermission": "CoFound uses your camera for video calls with founders you have matched with, and to take your profile photo.",
-          "microphonePermission": "CoFound uses your microphone so you can be heard during audio and video calls with founders you have matched with."
+          "photosPermission": "CoFoundr needs access to your photos so you can add pictures to your founder profile.",
+          "cameraPermission": "CoFoundr uses your camera for video calls with founders you have matched with, and to take your profile photo.",
+          "microphonePermission": "CoFoundr uses your microphone so you can be heard during audio and video calls with founders you have matched with."
         }
       ],
       [
         "@config-plugins/react-native-webrtc",
         {
-          "cameraPermission": "CoFound uses your camera for video calls with founders you have matched with, and to take your profile photo.",
-          "microphonePermission": "CoFound uses your microphone so you can be heard during audio and video calls with founders you have matched with."
+          "cameraPermission": "CoFoundr uses your camera for video calls with founders you have matched with, and to take your profile photo.",
+          "microphonePermission": "CoFoundr uses your microphone so you can be heard during audio and video calls with founders you have matched with."
         }
       ]
     ],

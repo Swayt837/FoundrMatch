@@ -1,4 +1,4 @@
-# CoFound
+# CoFoundr
 
 Find the person you'll build your next company with. An Expo (iOS / Android / web)
 app with a FastAPI + MongoDB backend and an AI-assisted matching engine.

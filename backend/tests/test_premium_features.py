@@ -1,5 +1,5 @@
 """
-Backend tests for CoFound Premium features (iteration 5).
+Backend tests for CoFoundr Premium features (iteration 5).
 Covers:
 - AI Copilot chat (real Claude via /api/ai/copilot/chat)
 - Profile Update (/api/profile/update partial + cache invalidation)

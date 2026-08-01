@@ -1,5 +1,5 @@
 /**
- * CoFound Premium Design System
+ * CoFoundr Premium Design System
  * "Glass / Luxe" - Dark cinematic Apple-like aesthetic
  */
 import { Platform, ViewStyle } from 'react-native';

@@ -87,7 +87,7 @@ def _plans() -> Dict[str, Plan]:
     return {
         "lifetime": Plan(
             id="lifetime",
-            name="CoFound Premium Lifetime",
+            name="CoFoundr Premium Lifetime",
             amount=LIFETIME_AMOUNT,
             currency=PREMIUM_CURRENCY,
             interval=None,
@@ -98,7 +98,7 @@ def _plans() -> Dict[str, Plan]:
         ),
         "monthly": Plan(
             id="monthly",
-            name="CoFound Premium (Monthly)",
+            name="CoFoundr Premium (Monthly)",
             amount=MONTHLY_AMOUNT,
             currency=PREMIUM_CURRENCY,
             interval="month",

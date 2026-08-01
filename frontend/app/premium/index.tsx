@@ -195,7 +195,7 @@ export default function PremiumScreen() {
             <Text style={styles.eyebrow}>COFOUND PREMIUM</Text>
             <Text style={styles.title}>Build faster.{'\n'}Match smarter.</Text>
             <Text style={styles.subtitle}>
-              Unlock the full CoFound engine — unlimited swipes, deep AI insights, and priority
+              Unlock the full CoFoundr engine — unlimited swipes, deep AI insights, and priority
               placement.
             </Text>
           </View>

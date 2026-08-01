@@ -428,7 +428,7 @@ be things this team can actually do with the skills listed."""
         Free-text rather than schema-constrained — the answer is prose for a human, and
         the route returns it as a single string.
         """
-        system = f"""You are CoFound AI Copilot, an expert startup advisor helping entrepreneurs build their business.
+        system = f"""You are CoFoundr AI Copilot, an expert startup advisor helping entrepreneurs build their business.
 
 User context:
 - Profession: {context.get('profession')}

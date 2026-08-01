@@ -1,5 +1,5 @@
 /**
- * Authentication Context for CoFound.
+ * Authentication Context for CoFoundr.
  *
  * Email/password and Google both end with the same thing in secure storage: an
  * access token this app's backend signed.

@@ -1,5 +1,5 @@
 """
-Authentication utilities for CoFound.
+Authentication utilities for CoFoundr.
 
 Email/password and Google sign-in both end at the same place: a JWT this backend
 issued. Google used to end somewhere else — an opaque session token minted by

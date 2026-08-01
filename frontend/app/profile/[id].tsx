@@ -480,7 +480,7 @@ export default function ProfileDetailScreen() {
           {/* Verified footer stub */}
           <View style={styles.footer}>
             <Globe size={12} color={theme.colors.textSecondary} strokeWidth={1.5} />
-            <Text style={styles.footerText}>Profile viewed via CoFound</Text>
+            <Text style={styles.footerText}>Profile viewed via CoFoundr</Text>
           </View>
         </View>
       </ScrollView>

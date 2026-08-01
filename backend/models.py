@@ -1,5 +1,5 @@
 """
-Database models for CoFound application
+Database models for CoFoundr application
 """
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Literal, Optional, List, Dict, Any

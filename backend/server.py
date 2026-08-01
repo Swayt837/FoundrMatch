@@ -1,5 +1,5 @@
 """
-CoFound Backend API — application composition.
+CoFoundr Backend API — application composition.
 
 This module only assembles the app: middleware, lifespan, and the routers. Endpoint
 logic lives in `routers/`, the Socket.io server in `realtime`, shared guards in
@@ -52,7 +52,7 @@ async def lifespan(app: FastAPI):
     print("Shutting down...")
 
 
-app = FastAPI(title="CoFound API", lifespan=lifespan)
+app = FastAPI(title="CoFoundr API", lifespan=lifespan)
 
 # Allowed origins come from the environment. `*` stays the default for local
 # development, but it is incompatible with credentialed requests — browsers
@@ -93,12 +93,12 @@ socket_app = socketio.ASGIApp(sio, app)
 
 @app.get("/api/health")
 async def health():
-    return {"status": "healthy", "service": "CoFound API"}
+    return {"status": "healthy", "service": "CoFoundr API"}
 
 
 @app.get("/api")
 async def root():
-    return {"message": "CoFound API - Find your perfect business partner"}
+    return {"message": "CoFoundr API - Find your perfect business partner"}
 
 
 if __name__ == "__main__":

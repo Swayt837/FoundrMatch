@@ -1,5 +1,5 @@
 /**
- * API Client for CoFound Backend
+ * API Client for CoFoundr Backend
  */
 import Constants from 'expo-constants';
 import { storage } from '@/src/utils/storage';

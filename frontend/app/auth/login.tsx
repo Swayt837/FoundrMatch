@@ -78,7 +78,7 @@ export default function LoginScreen() {
 
           <View style={styles.header}>
             <Text style={styles.eyebrow}>WELCOME BACK</Text>
-            <Text style={styles.title}>Log in to{'\n'}CoFound</Text>
+            <Text style={styles.title}>Log in to{'\n'}CoFoundr</Text>
             <Text style={styles.subtitle}>
               Continue your journey with your next partner.
             </Text>

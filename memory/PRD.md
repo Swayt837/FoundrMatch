@@ -1,7 +1,7 @@
-# CoFound - Product Requirements Document
+# CoFoundr - Product Requirements Document
 
 ## Vision
-CoFound is the Tinder for business cofounders and partners. Find the right person to build a business with, not just discuss ideas.
+CoFoundr is the Tinder for business cofounders and partners. Find the right person to build a business with, not just discuss ideas.
 
 ## Positioning
 "Meet the person you'll build your next company with."
