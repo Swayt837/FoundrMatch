@@ -10,7 +10,7 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "fr.boutot.cofound",
+      "bundleIdentifier": "com.cofoundr.app",
       "bitcode": false,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
@@ -22,7 +22,7 @@
         "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
-      "package": "fr.boutot.cofound",
+      "package": "com.cofoundr.app",
       "permissions": [
         "android.permission.INTERNET",
         "android.permission.CAMERA",
