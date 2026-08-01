@@ -7,9 +7,11 @@ The room document has always carried `documents`, `decisions` and `equity_split`
 fields that nothing ever wrote to. The endpoints below fill them in, and the three
 have deliberately different semantics:
 
-- **Documents** are links. There is no object storage in this deployment, and
-  base64-ing a pitch deck into a MongoDB document that also holds profile photos is
-  how you hit the 16 MB limit in production.
+- **Documents** are links or uploaded files. Links stay because founders keep their
+  deck in Drive anyway and a link never goes stale; uploads exist for what a link
+  cannot carry — the signed agreement, which belongs to the pair rather than to one
+  person's Drive. Uploaded files are read through short-lived signed URLs issued
+  only after the caller is checked against the room, never through a public link.
 - **Decisions** need agreement from both founders, because the point of a written
   decision log is that neither party can later claim they never signed off.
 - **Equity** needs agreement too, and is validated to sum to 100% across exactly the
@@ -22,6 +24,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+import storage
 from access import require_room_participant
 from ai_service import ai_service
 from auth import get_current_user
@@ -220,15 +223,60 @@ async def toggle_task(
 
 class DocumentCreate(BaseModel):
     """
-    A document is a link, not an upload.
+    A document is either a link or an uploaded file — exactly one of the two.
 
-    Founders keep their deck in Drive or Notion anyway, and shipping a link list is
-    honest about that rather than pretending to be a file store.
+    Links stay supported because founders genuinely do keep their deck in Drive,
+    and a link is always current where a copy goes stale. Uploads exist for what
+    a link cannot carry: the signed agreement itself, which belongs with the room
+    rather than in someone's personal Drive.
     """
     title: str = Field(min_length=1, max_length=200)
-    url: str = Field(min_length=1, max_length=2000)
+    url: Optional[str] = Field(default=None, max_length=2000)
+    # Returned by /documents/upload-url once the file has been sent to storage.
+    storage_key: Optional[str] = Field(default=None, max_length=500)
+    filename: Optional[str] = Field(default=None, max_length=255)
+    size_bytes: Optional[int] = Field(default=None, ge=0)
     doc_type: str = "other"
     note: Optional[str] = Field(default="", max_length=1000)
+
+
+class DocumentUploadRequest(BaseModel):
+    filename: str = Field(min_length=1, max_length=255)
+    content_type: str = "application/octet-stream"
+
+
+@router.post("/deal-rooms/{room_id}/documents/upload-url")
+async def create_document_upload(
+    room_id: str,
+    payload: DocumentUploadRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Authorise one document upload and return where to send it.
+
+    The bytes go straight to storage; the API only decides whether this caller
+    may write into this room. Nothing is recorded until the client comes back to
+    POST /documents with the returned key, so an abandoned upload leaves an
+    orphaned object rather than a broken entry in the room.
+    """
+    await require_room_participant(room_id, current_user["user_id"])
+
+    if not storage.configured():
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "File uploads are not available on this server; attach a link "
+                "instead. Missing: " + ", ".join(storage.missing_settings())
+            ),
+        )
+
+    try:
+        return storage.presign_document_upload(
+            room_id, payload.filename, payload.content_type
+        )
+    except storage.StorageError as exc:
+        status = 400 if "not accepted" in str(exc) else 502
+        raise HTTPException(status_code=status, detail=str(exc))
 
 
 @router.post("/deal-rooms/{room_id}/documents")
@@ -237,32 +285,87 @@ async def add_document(
     document: DocumentCreate,
     current_user: dict = Depends(get_current_user),
 ):
-    """Attach a document link to the room."""
+    """Attach a document to the room, by link or by uploaded file."""
     await require_room_participant(room_id, current_user["user_id"])
 
-    parsed = urlparse(document.url.strip())
-    # http(s) only: a `javascript:` or `data:` URL in a shared workspace is a link
-    # one founder can use to attack the other's session.
-    if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        raise HTTPException(status_code=400, detail="Enter a full http(s) link")
+    has_link = bool(document.url and document.url.strip())
+    has_file = bool(document.storage_key and document.storage_key.strip())
 
-    doc_type = document.doc_type if document.doc_type in DOCUMENT_TYPES else "other"
+    if has_link == has_file:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide either a link or an uploaded file, not both",
+        )
 
-    entry = {
+    entry: Dict[str, Any] = {
         "document_id": f"doc_{get_utc_now().timestamp()}",
         "title": document.title.strip(),
-        "url": document.url.strip(),
-        "doc_type": doc_type,
+        "doc_type": document.doc_type if document.doc_type in DOCUMENT_TYPES else "other",
         "note": (document.note or "").strip(),
         "added_by": current_user["user_id"],
         "created_at": get_utc_now(),
     }
+
+    if has_link:
+        parsed = urlparse(document.url.strip())
+        # http(s) only: a `javascript:` or `data:` URL in a shared workspace is a
+        # link one founder can use to attack the other's session.
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            raise HTTPException(status_code=400, detail="Enter a full http(s) link")
+        entry["kind"] = "link"
+        entry["url"] = document.url.strip()
+    else:
+        key = document.storage_key.strip()
+        # The key must be one we minted for *this* room. Without this check a
+        # participant could attach any object in the bucket — including another
+        # room's agreement — by guessing or replaying a key.
+        if not key.startswith(f"rooms/{room_id}/"):
+            raise HTTPException(status_code=400, detail="Unknown upload reference")
+        entry["kind"] = "file"
+        entry["storage_key"] = key
+        entry["filename"] = (document.filename or document.title).strip()
+        entry["size_bytes"] = document.size_bytes
 
     await deal_rooms_collection.update_one(
         {"room_id": room_id},
         {"$push": {"documents": entry}, "$set": {"updated_at": get_utc_now()}},
     )
     return entry
+
+
+@router.get("/deal-rooms/{room_id}/documents/{document_id}/download")
+async def download_document(
+    room_id: str,
+    document_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    A short-lived URL for reading one uploaded document.
+
+    Deliberately not a public link. Room documents are the agreements a pair is
+    negotiating, so every read is authorised against the room's membership first
+    and the URL expires — even where the bucket itself happens to be readable.
+    """
+    room = await require_room_participant(room_id, current_user["user_id"])
+
+    target = next(
+        (d for d in room.get("documents", []) if d.get("document_id") == document_id),
+        None,
+    )
+    if not target:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    if target.get("kind") != "file" or not target.get("storage_key"):
+        raise HTTPException(status_code=400, detail="This document is a link, open it directly")
+
+    try:
+        url = storage.presign_document_download(
+            target["storage_key"], target.get("filename") or target.get("title") or "document"
+        )
+    except storage.StorageError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    return {"url": url, "expires_in": storage.DOWNLOAD_URL_TTL, "filename": target.get("filename")}
 
 
 @router.delete("/deal-rooms/{room_id}/documents/{document_id}")
@@ -272,14 +375,22 @@ async def remove_document(
     current_user: dict = Depends(get_current_user),
 ):
     """
-    Remove a document link.
+    Remove a document.
 
-    Either founder can remove any link: the room is a shared workspace, not two
-    private ones, and a stale legal document is worse than a lost link.
+    Either founder can remove any of them: the room is a shared workspace, not
+    two private ones, and a stale legal document is worse than a lost link.
+
+    An uploaded file is deleted from storage too. Leaving the object behind
+    would mean a document a founder believes they removed is still readable by
+    anyone holding an old signed URL.
     """
     room = await require_room_participant(room_id, current_user["user_id"])
 
-    if not any(d.get("document_id") == document_id for d in room.get("documents", [])):
+    target = next(
+        (d for d in room.get("documents", []) if d.get("document_id") == document_id),
+        None,
+    )
+    if not target:
         raise HTTPException(status_code=404, detail="Document not found")
 
     await deal_rooms_collection.update_one(
@@ -289,6 +400,10 @@ async def remove_document(
             "$set": {"updated_at": get_utc_now()},
         },
     )
+
+    if target.get("kind") == "file" and target.get("storage_key"):
+        storage.delete_document(target["storage_key"])
+
     return {"document_id": document_id, "removed": True}
 
 

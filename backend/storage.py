@@ -59,6 +59,34 @@ CONTENT_TYPES = {
 
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 
+# Deal-room documents. Separate from photos in every respect: they are bigger,
+# they are not images, and they are private.
+#
+# `R2_DOCS_BUCKET` should be a bucket with **no public access**. Profile photos
+# live in a public bucket by design — they are shown to strangers in a swipe
+# feed. A cofounder agreement is the opposite, and putting one in a bucket the
+# internet can read leaves only the unguessability of its key between it and
+# anyone who finds the URL. Falling back to the photo bucket keeps the feature
+# working without a second bucket, but downloads always go through a signed,
+# short-lived URL either way, so the object is never linked publicly.
+R2_DOCS_BUCKET = os.getenv("R2_DOCS_BUCKET", "").strip()
+
+MAX_DOCUMENT_BYTES = 25 * 1024 * 1024
+
+# Download URLs outlive an upload: a founder may open a document, get
+# interrupted, and come back to it.
+DOWNLOAD_URL_TTL = 900
+
+# Extensions a founder would actually attach. The list exists to keep
+# executables and scripts out of a shared workspace, not to be exhaustive.
+DOCUMENT_EXTENSIONS = {
+    "pdf", "doc", "docx", "odt", "rtf", "txt", "md",
+    "xls", "xlsx", "ods", "csv",
+    "ppt", "pptx", "odp",
+    "png", "jpg", "jpeg", "webp", "gif", "svg",
+    "zip",
+}
+
 
 class StorageError(RuntimeError):
     """Raised when R2 rejects an operation."""
@@ -178,6 +206,96 @@ def presign_photo_upload(user_id: str, content_type: str) -> Dict[str, object]:
         "headers": {"Content-Type": content_type},
         "max_bytes": MAX_UPLOAD_BYTES,
     }
+
+
+# ===== Deal-room documents =====
+
+def documents_bucket() -> str:
+    """The private bucket if one is configured, otherwise the photo bucket."""
+    return R2_DOCS_BUCKET or R2_BUCKET
+
+
+def extension_of(filename: str) -> str:
+    """
+    The extension, lowercased, if it is one we accept.
+
+    Taken from the name rather than the declared content type: browsers and
+    phones disagree wildly about the type of an .xlsx, and the extension is what
+    the other founder's machine will use to open it anyway.
+    """
+    _, _, tail = filename.rpartition(".")
+    extension = tail.lower().strip()
+    if not extension or extension not in DOCUMENT_EXTENSIONS:
+        raise StorageError(
+            f"Files of type {tail!r} are not accepted. Allowed: "
+            + ", ".join(sorted(DOCUMENT_EXTENSIONS))
+        )
+    return extension
+
+
+def presign_document_upload(room_id: str, filename: str, content_type: str) -> Dict[str, object]:
+    """
+    A one-shot URL for uploading one document to a deal room.
+
+    No public URL is returned, unlike photos. The stored key is what the room
+    records, and reading it later goes through `presign_document_download`,
+    which only issues a URL after the caller has been checked against the room's
+    membership.
+    """
+    extension = extension_of(filename)
+    key = f"rooms/{room_id}/{uuid.uuid4().hex}.{extension}"
+
+    try:
+        url = client().generate_presigned_url(
+            "put_object",
+            Params={
+                "Bucket": documents_bucket(),
+                "Key": key,
+                "ContentType": content_type or "application/octet-stream",
+            },
+            ExpiresIn=UPLOAD_URL_TTL,
+        )
+    except (BotoCoreError, ClientError) as exc:
+        raise StorageError(f"Could not sign upload: {exc}") from exc
+
+    return {
+        "upload_url": url,
+        "key": key,
+        "expires_in": UPLOAD_URL_TTL,
+        "headers": {"Content-Type": content_type or "application/octet-stream"},
+        "max_bytes": MAX_DOCUMENT_BYTES,
+    }
+
+
+def presign_document_download(key: str, filename: str) -> str:
+    """
+    A short-lived URL for reading one stored document.
+
+    `ResponseContentDisposition` carries the original filename, so a document
+    saved as `rooms/<id>/<uuid>.pdf` still arrives as `pacte-associes.pdf`.
+    """
+    # Quoted to survive spaces and accents in the name.
+    safe = filename.replace('"', "").replace("\r", "").replace("\n", "")
+    try:
+        return client().generate_presigned_url(
+            "get_object",
+            Params={
+                "Bucket": documents_bucket(),
+                "Key": key,
+                "ResponseContentDisposition": f'attachment; filename="{safe}"',
+            },
+            ExpiresIn=DOWNLOAD_URL_TTL,
+        )
+    except (BotoCoreError, ClientError) as exc:
+        raise StorageError(f"Could not sign download: {exc}") from exc
+
+
+def delete_document(key: str) -> None:
+    """Remove a stored document. Missing objects are not an error."""
+    try:
+        client().delete_object(Bucket=documents_bucket(), Key=key)
+    except (BotoCoreError, ClientError):
+        pass
 
 
 def put_bytes(key: str, data: bytes, content_type: str) -> str:

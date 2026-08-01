@@ -134,3 +134,43 @@ def test_endpoint_defaults_to_the_global_hostname(configured):
 def test_endpoint_override_wins(monkeypatch, configured):
     monkeypatch.setattr(storage, "R2_ENDPOINT", "https://acct.eu.r2.cloudflarestorage.com")
     assert storage.endpoint() == "https://acct.eu.r2.cloudflarestorage.com"
+
+
+# ===== deal-room documents =====
+
+def test_document_extension_allowlist(configured):
+    assert storage.extension_of("pacte.pdf") == "pdf"
+    assert storage.extension_of("Business Plan.DOCX") == "docx"
+
+    with pytest.raises(storage.StorageError, match="not accepted"):
+        storage.extension_of("payload.exe")
+    with pytest.raises(storage.StorageError, match="not accepted"):
+        storage.extension_of("noextension")
+
+
+def test_document_key_is_scoped_to_its_room(configured):
+    signed = storage.presign_document_upload("room_abc", "pacte.pdf", "application/pdf")
+
+    # The room prefix is what lets the API refuse a key minted for another room.
+    assert signed["key"].startswith("rooms/room_abc/")
+    assert signed["key"].endswith(".pdf")
+    assert "upload_url" in signed
+    # Deliberately absent: a document must not get a public URL.
+    assert "public_url" not in signed
+
+
+def test_document_download_is_signed_and_named(configured):
+    url = storage.presign_document_download("rooms/room_abc/x.pdf", "pacte d'associes.pdf")
+
+    assert "X-Amz-Signature" in url
+    assert "X-Amz-Expires" in url
+    # The stored key is a uuid; the original name comes back on download.
+    assert "response-content-disposition" in url.lower()
+
+
+def test_documents_bucket_falls_back_to_the_photo_bucket(monkeypatch, configured):
+    monkeypatch.setattr(storage, "R2_DOCS_BUCKET", "")
+    assert storage.documents_bucket() == "bucket"
+
+    monkeypatch.setattr(storage, "R2_DOCS_BUCKET", "private-docs")
+    assert storage.documents_bucket() == "private-docs"

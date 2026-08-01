@@ -64,6 +64,11 @@ services:
       # Only for an EU-jurisdiction bucket, which answers on a different host.
       - key: R2_ENDPOINT
         sync: false
+      # A bucket with NO public access, for deal-room documents. Falls back to
+      # the photo bucket when unset; downloads are signed and short-lived either
+      # way, but agreements should not sit in a publicly readable bucket.
+      - key: R2_DOCS_BUCKET
+        sync: false
 
       # --- Claude ---
       - key: ANTHROPIC_API_KEY
