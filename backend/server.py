@@ -10,6 +10,7 @@ Routers, in the order they are mounted:
     premium, account         payments, settings, moderation
     auth_routes              register / login / OAuth / session
     profiles                 onboarding, photos, profile read & edit
+    uploads                  signed URLs for images going to object storage
     discovery                swipe feed, swipes, matches
     chat                     message history, read receipts, sending
     calls                    WebRTC ICE configuration (signalling lives in realtime)
@@ -38,6 +39,7 @@ from routers import (
     discovery,
     profiles,
     projects,
+    uploads,
 )
 
 load_dotenv()
@@ -78,6 +80,7 @@ app.include_router(account_router)
 # Product domains
 app.include_router(auth_routes.router)
 app.include_router(profiles.router)
+app.include_router(uploads.router)
 app.include_router(discovery.router)
 app.include_router(chat.router)
 app.include_router(calls.router)

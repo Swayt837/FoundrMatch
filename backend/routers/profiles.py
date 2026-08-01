@@ -5,6 +5,7 @@ import re
 from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import ValidationError
 
 import personality
 from auth import get_current_user
@@ -123,8 +124,17 @@ async def update_profile(
     
     set_ops = {"updated_at": get_utc_now()}
     for key, value in updates.items():
-        if key in allowed:
-            set_ops[f"profile.{key}"] = value
+        if key not in allowed:
+            continue
+        if key == "photos":
+            # Same validation as the dedicated upload route. Without this, the
+            # generic update was a way straight past it: it accepts a free-form
+            # dict, so any URL at all could be written into a profile here.
+            try:
+                value = PhotosUpload(photos=value).photos
+            except ValidationError as exc:
+                raise HTTPException(status_code=422, detail=exc.errors())
+        set_ops[f"profile.{key}"] = value
     
     if len(set_ops) == 1:
         raise HTTPException(status_code=400, detail="No valid fields to update")

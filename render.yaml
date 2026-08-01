@@ -48,6 +48,20 @@ services:
       - key: SEED_PASSWORD
         sync: false
 
+      # --- Object storage for profile photos (Cloudflare R2) ---
+      # Until all five are set, /api/uploads/photo answers 503 and the app keeps
+      # storing photos inline as base64.
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET
+        sync: false
+      - key: R2_PUBLIC_BASE_URL
+        sync: false
+
       # --- Claude ---
       - key: ANTHROPIC_API_KEY
         sync: false

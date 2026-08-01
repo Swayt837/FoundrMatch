@@ -139,25 +139,45 @@ class OnboardingData(BaseModel):
 
 class PhotosUpload(BaseModel):
     """
-    Profile photo upload payload.
+    Profile photo list.
 
     Wrapped in a model so FastAPI reads it from the request body — a bare
-    `List[str]` parameter is parsed as a repeated query parameter. Photos are
-    base64 strings stored inline in the user document, so the total size is capped
-    well below MongoDB's 16 MB document limit.
+    `List[str]` parameter is parsed as a repeated query parameter.
+
+    Each entry is either a URL in our own object storage (the normal path, see
+    storage.py) or an inline `data:` URI. Inline images are still accepted so the
+    app works against a deployment with no storage configured, and so profiles
+    written before the migration keep validating, but they are capped well below
+    MongoDB's 16 MB document limit.
+
+    Anything else is refused. Accepting arbitrary URLs would let a client store
+    a third-party address in their profile and turn everyone who views it into a
+    request to that server, handing over their IP address.
     """
     photos: List[str] = Field(default_factory=list, max_length=5)
 
     @field_validator("photos")
     @classmethod
-    def check_photo_sizes(cls, photos: List[str]) -> List[str]:
+    def check_photos(cls, photos: List[str]) -> List[str]:
+        import storage
+
         max_photo_chars = 3_000_000  # ~2.2 MB decoded
         max_total_chars = 10_000_000  # ~7.5 MB decoded, leaves room in the doc
 
+        inline_total = 0
         for photo in photos:
+            if storage.is_managed_url(photo):
+                continue
+            if not photo.startswith("data:"):
+                raise ValueError(
+                    "Photos must be uploaded through /api/uploads/photo; "
+                    "external URLs are not accepted"
+                )
             if len(photo) > max_photo_chars:
                 raise ValueError("Each photo must be under ~2MB")
-        if sum(len(p) for p in photos) > max_total_chars:
+            inline_total += len(photo)
+
+        if inline_total > max_total_chars:
             raise ValueError("Photos are too large in total; please use smaller images")
         return photos
 
