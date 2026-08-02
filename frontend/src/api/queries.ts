@@ -343,6 +343,28 @@ export function useDealRoomActions(matchId: string, roomId?: string) {
     onSuccess: invalidate,
   });
 
+  const signDocument = useMutation({
+    mutationFn: (documentId: string) => api.signDocument(roomId as string, documentId),
+    onSuccess: invalidate,
+  });
+
+  /**
+   * Pick a replacement file and attach it as a new version. Resolves to null
+   * when the picker is dismissed.
+   */
+  const replaceDocument = useMutation({
+    mutationFn: async (documentId: string) => {
+      const picked = await pickAndUploadDocument(roomId as string);
+      if (!picked) return null;
+      return api.addDocumentVersion(roomId as string, documentId, {
+        storage_key: picked.storage_key,
+        filename: picked.filename,
+        size_bytes: picked.size_bytes,
+      });
+    },
+    onSuccess: invalidate,
+  });
+
   const removeDocument = useMutation({
     mutationFn: (documentId: string) =>
       api.removeDealRoomDocument(roomId as string, documentId),
@@ -388,6 +410,8 @@ export function useDealRoomActions(matchId: string, roomId?: string) {
     removeNote,
     addDocument,
     uploadDocument,
+    signDocument,
+    replaceDocument,
     removeDocument,
     addDecision,
     agreeToDecision,

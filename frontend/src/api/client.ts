@@ -173,8 +173,31 @@ class APIClient {
    * Room documents have no public link on purpose — they are the agreements a
    * pair is negotiating — so every read is authorised server-side first.
    */
-  async getDocumentDownloadUrl(roomId: string, documentId: string) {
-    return this.request(`/deal-rooms/${roomId}/documents/${documentId}/download`);
+  async getDocumentDownloadUrl(roomId: string, documentId: string, version?: number) {
+    const qs = version ? `?version=${version}` : '';
+    return this.request(`/deal-rooms/${roomId}/documents/${documentId}/download${qs}`);
+  }
+
+  /**
+   * Sign a document. An audit trail — both founders pressed the button on this
+   * exact file — not a qualified electronic signature.
+   */
+  async signDocument(roomId: string, documentId: string) {
+    return this.request(`/deal-rooms/${roomId}/documents/${documentId}/sign`, {
+      method: 'POST',
+    });
+  }
+
+  /** Replace a document's file. Clears its signatures server-side. */
+  async addDocumentVersion(
+    roomId: string,
+    documentId: string,
+    payload: { storage_key: string; filename?: string; size_bytes?: number }
+  ) {
+    return this.request(`/deal-rooms/${roomId}/documents/${documentId}/versions`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
   }
 
   /**

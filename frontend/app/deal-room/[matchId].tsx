@@ -105,6 +105,9 @@ export default function DealRoomScreen() {
     [room?.participants, myId]
   );
 
+  /** Whether the current user has already signed this document. */
+  const iSigned = (doc: any) =>
+    (doc.signed_by || []).some((s: any) => s.user_id === myId);
   const nameOf = (userId?: string) => {
     if (!userId) return 'Cofounder';
     if (userId === myId) return 'You';
@@ -795,7 +798,9 @@ export default function DealRoomScreen() {
 
               <Text style={styles.hint}>
                 Link what lives elsewhere; upload what belongs to the two of you —
-                the signed agreement, not the deck.
+                the signed agreement, not the deck. Signing here records that you
+                both approved this exact file; it is not a qualified electronic
+                signature.
               </Text>
             </View>
 
@@ -808,7 +813,8 @@ export default function DealRoomScreen() {
             ) : (
               <View style={styles.listGap}>
                 {documents.map((doc: any) => (
-                  <View key={doc.document_id} style={styles.rowCard}>
+                  <View key={doc.document_id} style={styles.docCard}>
+                    <View style={styles.docRow}>
                     <TouchableOpacity
                       style={styles.rowMain}
                       onPress={() => openDocument(doc)}
@@ -843,6 +849,48 @@ export default function DealRoomScreen() {
                     >
                       <Trash2 size={14} color={theme.colors.errorOn} strokeWidth={1.75} />
                     </TouchableOpacity>
+                    </View>
+
+                    {doc.kind === 'file' && (
+                      <View style={styles.docFooter}>
+                        <Text style={styles.rowMeta}>
+                          v{doc.version || 1}
+                          {doc.signature_status === 'signed'
+                            ? ' · signed by both'
+                            : (doc.signed_by || []).length > 0
+                              ? ' · awaiting one signature'
+                              : ' · unsigned'}
+                        </Text>
+
+                        <View style={styles.docActions}>
+                          {!iSigned(doc) && (
+                            <TouchableOpacity
+                              style={styles.signBtn}
+                              onPress={() =>
+                                actions.signDocument.mutate(doc.document_id, {
+                                  onError: fail('Could not sign that document'),
+                                })
+                              }
+                              testID={`dealroom-doc-sign-${doc.document_id}`}
+                            >
+                              <Text style={styles.signBtnText}>Sign</Text>
+                            </TouchableOpacity>
+                          )}
+                          <TouchableOpacity
+                            style={styles.replaceBtn}
+                            onPress={() =>
+                              actions.replaceDocument.mutate(doc.document_id, {
+                                onError: (e: any) =>
+                                  setError(e?.message || 'Could not upload that version'),
+                              })
+                            }
+                            testID={`dealroom-doc-replace-${doc.document_id}`}
+                          >
+                            <Text style={styles.replaceBtnText}>New version</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    )}
                   </View>
                 ))}
               </View>
@@ -1580,4 +1628,38 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.md, backgroundColor: theme.colors.brandTertiary,
     borderWidth: 1, borderColor: 'rgba(212,175,55,0.35)',
   },
-  noticeBannerText: { ...theme.typography.footnote, color: theme.colors.brand },});
+  noticeBannerText: { ...theme.typography.footnote, color: theme.colors.brand },
+
+  docCard: {
+    borderRadius: theme.radius.md,
+    backgroundColor: theme.colors.surfaceSecondary,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    overflow: 'hidden',
+  },
+  docRow: { flexDirection: 'row', alignItems: 'center' },
+  docFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: theme.spacing.md,
+    paddingBottom: theme.spacing.sm,
+    gap: theme.spacing.sm,
+  },
+  docActions: { flexDirection: 'row', gap: theme.spacing.sm },
+  signBtn: {
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: 6,
+    borderRadius: theme.radius.pill,
+    backgroundColor: theme.colors.brand,
+  },
+  signBtnText: { ...theme.typography.caption, color: theme.colors.brandOn, fontWeight: '700' },
+  replaceBtn: {
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: 6,
+    borderRadius: theme.radius.pill,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  replaceBtnText: { ...theme.typography.caption, color: theme.colors.textSecondary },
+});
