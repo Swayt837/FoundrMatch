@@ -13,6 +13,7 @@ half, and neither half would look wrong.
 """
 from typing import Any, Dict, Optional, Tuple
 
+import push
 from compatibility import score_compatibility
 from database import get_utc_now, matches_collection, users_collection
 from realtime import sio
@@ -90,6 +91,16 @@ async def ensure_match(
             "origin": origin,
         },
         room=f"user:{user_b_id}",
+    )
+
+    # And a push, which is the half that reaches them when the app is closed —
+    # which is most of the time, and the whole point of a matching product.
+    name = (user_a.get("profile") or {}).get("name") or "A founder"
+    push.send_soon(
+        [user_b_id],
+        "New match",
+        f"{name} matched with you — {round(compatibility.get('overall_score', 0))}% compatible.",
+        {"type": "match", "match_id": match["match_id"]},
     )
 
     return match, True

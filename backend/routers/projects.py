@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 
+import push
 from auth import get_current_user
 from database import get_utc_now, projects_collection, users_collection
 from matches import ensure_match
@@ -209,6 +210,14 @@ async def apply_to_project(
         "project_title": project.get("title"),
     }, room=f"user:{project['user_id']}")
 
+    applicant_name = (current_user.get("profile") or {}).get("name") or "A founder"
+    push.send_soon(
+        [project["user_id"]],
+        "New application",
+        f'{applicant_name} applied to "{project.get("title")}".',
+        {"type": "project_application", "project_id": project_id},
+    )
+
     return {"applied": True, "project_id": project_id}
 
 @router.get("/projects/{project_id}/applicants")
@@ -335,6 +344,13 @@ async def accept_applicant(
         room=f"user:{applicant_id}",
     )
 
+    push.send_soon(
+        [applicant_id],
+        "You're in",
+        f'Your application to "{project.get("title")}" was accepted — say hello.',
+        {"type": "match", "match_id": match["match_id"]},
+    )
+
     return {
         "accepted": True,
         "match_id": match["match_id"],
@@ -371,6 +387,13 @@ async def decline_applicant(
         "application_declined",
         {"project_id": project_id, "project_title": project.get("title")},
         room=f"user:{applicant_id}",
+    )
+
+    push.send_soon(
+        [applicant_id],
+        "Application update",
+        f'Your application to "{project.get("title")}" was not taken forward.',
+        {"type": "project", "project_id": project_id},
     )
 
     return {"declined": True, "applicant_id": applicant_id}

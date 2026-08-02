@@ -34,6 +34,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+import push
 import storage
 from access import require_room_participant
 from ai_service import ai_service
@@ -88,6 +89,7 @@ async def _notify(room: Dict[str, Any], actor: Dict[str, Any], summary: str) -> 
     """
     actor_id = actor["user_id"]
     actor_name = (actor.get("profile") or {}).get("name") or "Your cofounder"
+    sentence = f"{actor_name} {summary}"
 
     for participant in room.get("participants", []):
         if participant == actor_id:
@@ -98,10 +100,21 @@ async def _notify(room: Dict[str, Any], actor: Dict[str, Any], summary: str) -> 
                 "room_id": room.get("room_id"),
                 "match_id": room.get("match_id"),
                 "actor_id": actor_id,
-                "summary": f"{actor_name} {summary}",
+                "summary": sentence,
             },
             room=f"user:{participant}",
         )
+
+    # The socket only reaches an open app. Pushing the same sentence is what
+    # makes an equity proposal something the other founder learns about today
+    # rather than whenever they next open that tab.
+    push.send_soon(
+        room.get("participants", []),
+        room.get("project_name") or "Deal room",
+        sentence,
+        {"type": "deal_room", "match_id": room.get("match_id")},
+        exclude=actor_id,
+    )
 
 
 async def _touch(room_id: str, **set_fields: Any) -> None:

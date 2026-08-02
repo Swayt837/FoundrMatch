@@ -7,6 +7,7 @@ own persistence and are what the client falls back to when the socket is down.
 from fastapi import APIRouter, Depends, HTTPException
 
 from access import require_match_participant
+import push
 from auth import get_current_user
 from database import get_utc_now, messages_collection
 from models import MessageCreate
@@ -125,6 +126,16 @@ async def send_message(
         "sender_id": user_id,
         "preview": content[:120],
     }, room=f"user:{other_id}")
+
+    # The socket covers an open app; this covers the rest of the day. Truncated
+    # rather than sent whole: the body lands on a lock screen.
+    sender_name = (current_user.get("profile") or {}).get("name") or "Your match"
+    push.send_soon(
+        [other_id],
+        sender_name,
+        content[:140],
+        {"type": "message", "match_id": match_id},
+    )
 
     msg_data.pop("_id", None)
     return msg_data
