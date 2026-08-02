@@ -120,6 +120,34 @@ export function useApplyToProject(projectId: string) {
   });
 }
 
+/**
+ * Decide on an applicant.
+ *
+ * Accepting creates a match, so the matches list is invalidated too — the new
+ * conversation should be there when the owner goes looking for it.
+ */
+export function useDecideApplicant(projectId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ applicantId, decision }: { applicantId: string; decision: 'accept' | 'decline' }) =>
+      decision === 'accept'
+        ? api.acceptApplicant(projectId, applicantId)
+        : api.declineApplicant(projectId, applicantId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.matches });
+    },
+  });
+}
+
+export function useWithdrawApplication(projectId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.withdrawApplication(projectId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['projects'] }),
+  });
+}
+
 export function useSetProjectStatus(projectId: string) {
   const queryClient = useQueryClient();
   return useMutation({

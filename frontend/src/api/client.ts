@@ -274,6 +274,23 @@ class APIClient {
     });
   }
 
+  /** Accept an applicant. Creates a match, so the pair gets a conversation. */
+  async acceptApplicant(projectId: string, applicantId: string) {
+    return this.request(`/projects/${projectId}/applicants/${applicantId}/accept`, {
+      method: 'POST',
+    });
+  }
+
+  async declineApplicant(projectId: string, applicantId: string) {
+    return this.request(`/projects/${projectId}/applicants/${applicantId}/decline`, {
+      method: 'POST',
+    });
+  }
+
+  async withdrawApplication(projectId: string) {
+    return this.request(`/projects/${projectId}/apply`, { method: 'DELETE' });
+  }
+
   // Objectives — outcomes the pair is aiming for, as opposed to tasks.
   async addDealRoomObjective(roomId: string, objective: { title: string; target_date?: string }) {
     return this.request(`/deal-rooms/${roomId}/objectives`, {

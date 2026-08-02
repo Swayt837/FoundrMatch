@@ -27,6 +27,8 @@ import {
   useApplyToProject,
   useProject,
   useProjectApplicants,
+  useDecideApplicant,
+  useWithdrawApplication,
   useSetProjectStatus,
 } from '@/src/api/queries';
 import { theme } from '@/src/theme';
@@ -49,6 +51,34 @@ export default function ProjectDetailScreen() {
   const { data: applicantsData } = useProjectApplicants(id, !!project?.is_owner);
   const applyMutation = useApplyToProject(id!);
   const statusMutation = useSetProjectStatus(id!);
+  const decideMutation = useDecideApplicant(id!);
+  const withdrawMutation = useWithdrawApplication(id!);
+  const deciding = decideMutation.isPending;
+
+  /**
+   * Accepting creates a match, so the pair lands in a conversation. Declining is
+   * recorded rather than dropped — an application left pending forever is the
+   * outcome nobody wants.
+   */
+  const decide = (applicantId: string, decision: 'accept' | 'decline') => {
+    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setActionError(null);
+    decideMutation.mutate(
+      { applicantId, decision },
+      {
+        onError: (e: any) =>
+          setActionError(e?.detail || e?.message || 'Could not update that application'),
+      }
+    );
+  };
+
+  const withdraw = () => {
+    setActionError(null);
+    withdrawMutation.mutate(undefined, {
+      onError: (e: any) =>
+        setActionError(e?.detail || e?.message || 'Could not withdraw your application'),
+    });
+  };
 
   const applicants: any[] = applicantsData?.applicants ?? [];
   const applying = applyMutation.isPending;
@@ -239,6 +269,40 @@ export default function ProjectDetailScreen() {
                             {applicant.user?.profile?.profession?.replace(/_/g, ' ')}
                           </Text>
                         )}
+
+                        {applicant.status === 'accepted' ? (
+                          <TouchableOpacity
+                            style={styles.applicantDecided}
+                            onPress={() => router.push('/(tabs)/matches')}
+                            testID={`project-applicant-open-chat-${applicant.user_id}`}
+                          >
+                            <Check size={13} color={theme.colors.brand} strokeWidth={2.5} />
+                            <Text style={styles.applicantAcceptedText}>
+                              Accepted — open the conversation
+                            </Text>
+                          </TouchableOpacity>
+                        ) : applicant.status === 'declined' ? (
+                          <Text style={styles.applicantDeclinedText}>Declined</Text>
+                        ) : (
+                          <View style={styles.applicantActions}>
+                            <TouchableOpacity
+                              style={styles.acceptBtn}
+                              onPress={() => decide(applicant.user_id, 'accept')}
+                              disabled={deciding}
+                              testID={`project-applicant-accept-${applicant.user_id}`}
+                            >
+                              <Text style={styles.acceptBtnText}>Accept & chat</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={styles.declineBtn}
+                              onPress={() => decide(applicant.user_id, 'decline')}
+                              disabled={deciding}
+                              testID={`project-applicant-decline-${applicant.user_id}`}
+                            >
+                              <Text style={styles.declineBtnText}>Decline</Text>
+                            </TouchableOpacity>
+                          </View>
+                        )}
                       </View>
                     </TouchableOpacity>
                   ))}
@@ -256,10 +320,22 @@ export default function ProjectDetailScreen() {
               </TouchableOpacity>
             </>
           ) : project.has_applied ? (
-            <View style={styles.appliedBanner} testID="project-applied">
-              <Check size={16} color={theme.colors.brand} strokeWidth={2.5} />
-              <Text style={styles.appliedText}>Application sent</Text>
-            </View>
+            <>
+              <View style={styles.appliedBanner} testID="project-applied">
+                <Check size={16} color={theme.colors.brand} strokeWidth={2.5} />
+                <Text style={styles.appliedText}>Application sent</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                onPress={withdraw}
+                disabled={withdrawMutation.isPending}
+                testID="project-withdraw"
+              >
+                <Text style={styles.secondaryButtonText}>
+                  {withdrawMutation.isPending ? 'Withdrawing…' : 'Withdraw my application'}
+                </Text>
+              </TouchableOpacity>
+            </>
           ) : project.status === 'open' ? (
             <>
               <Text style={styles.sectionTitle}>Your pitch</Text>
@@ -474,4 +550,17 @@ const styles = StyleSheet.create({
     borderColor: theme.colors.errorOn,
   },
   errorText: { ...theme.typography.footnote, color: theme.colors.errorOn },
-});
+  applicantActions: { flexDirection: 'row', gap: theme.spacing.sm, marginTop: theme.spacing.sm },
+  acceptBtn: {
+    paddingHorizontal: theme.spacing.md, paddingVertical: 8,
+    borderRadius: theme.radius.pill, backgroundColor: theme.colors.brand,
+  },
+  acceptBtnText: { ...theme.typography.caption, color: theme.colors.brandOn, fontWeight: '700' },
+  declineBtn: {
+    paddingHorizontal: theme.spacing.md, paddingVertical: 8,
+    borderRadius: theme.radius.pill, borderWidth: 1, borderColor: theme.colors.border,
+  },
+  declineBtnText: { ...theme.typography.caption, color: theme.colors.textSecondary },
+  applicantDecided: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: theme.spacing.sm },
+  applicantAcceptedText: { ...theme.typography.caption, color: theme.colors.brand, fontWeight: '600' },
+  applicantDeclinedText: { ...theme.typography.caption, color: theme.colors.textSecondary, marginTop: theme.spacing.sm },});
