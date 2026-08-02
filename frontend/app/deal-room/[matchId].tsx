@@ -31,6 +31,7 @@ import * as Haptics from 'expo-haptics';
 import { api, ApiError } from '@/src/api/client';
 import { formatSize } from '@/src/utils/documents';
 import { useDealRoom, useDealRoomActions } from '@/src/api/queries';
+import { useSocketEvent } from '@/src/hooks/use-socket-event';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { theme } from '@/src/theme';
 
@@ -67,6 +68,7 @@ export default function DealRoomScreen() {
   const [vesting, setVesting] = useState<string | null>(null);
   const [cliff, setCliff] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const { data: room, isPending: loading, refetch } = useDealRoom(matchId);
   const actions = useDealRoomActions(matchId!, room?.room_id);
@@ -76,6 +78,19 @@ export default function DealRoomScreen() {
     useCallback(() => {
       if (matchId) refetch();
     }, [matchId, refetch])
+  );
+
+  // The other founder acting on the room used to be invisible until you happened
+  // to open the right tab. One event type covers every change: refetch, and show
+  // the sentence the server composed.
+  useSocketEvent(
+    'deal_room_updated',
+    (payload: any) => {
+      if (!payload || payload.match_id !== matchId) return;
+      setNotice(payload.summary);
+      refetch();
+    },
+    !!matchId
   );
 
   const haptic = () => {
@@ -153,6 +168,22 @@ export default function DealRoomScreen() {
     setError(null);
     actions.generateRoadmap.mutate(undefined, {
       onError: fail('Roadmap generation failed'),
+    });
+  };
+
+  const importPhase = (phaseIndex: number) => {
+    if (!room) return;
+    haptic();
+    setError(null);
+    actions.importRoadmapPhase.mutate(phaseIndex, {
+      onSuccess: (result: any) => {
+        setNotice(
+          result?.skipped
+            ? 'Those tasks are already in your list.'
+            : `Added ${result.created.length} tasks. Open the Tasks tab.`
+        );
+      },
+      onError: fail('Could not import that phase'),
     });
   };
 
@@ -444,6 +475,12 @@ export default function DealRoomScreen() {
       {error && (
         <TouchableOpacity style={styles.errorBanner} onPress={() => setError(null)}>
           <Text style={styles.errorBannerText}>{error}</Text>
+        </TouchableOpacity>
+      )}
+
+      {notice && (
+        <TouchableOpacity style={styles.noticeBanner} onPress={() => setNotice(null)}>
+          <Text style={styles.noticeBannerText}>{notice}</Text>
         </TouchableOpacity>
       )}
 
@@ -1112,6 +1149,29 @@ export default function DealRoomScreen() {
                         <Text style={styles.milestoneText}>{phase.milestones.join(' · ')}</Text>
                       </View>
                     )}
+
+                    {/* The roadmap was a document beside the task list; this is
+                        what connects them. Already-present titles are skipped
+                        server-side, so pressing twice is harmless. */}
+                    {phase.tasks?.length > 0 && (
+                      <TouchableOpacity
+                        style={styles.secondaryBtn}
+                        onPress={() => importPhase(i)}
+                        disabled={actions.importRoadmapPhase.isPending}
+                        testID={`dealroom-import-phase-${i}`}
+                      >
+                        {actions.importRoadmapPhase.isPending ? (
+                          <ActivityIndicator color={theme.colors.brand} />
+                        ) : (
+                          <>
+                            <ListChecks size={14} color={theme.colors.brand} strokeWidth={2} />
+                            <Text style={styles.secondaryBtnText}>
+                              Add these {phase.tasks.length} to my tasks
+                            </Text>
+                          </>
+                        )}
+                      </TouchableOpacity>
+                    )}
                   </View>
                 ))}
                 
@@ -1514,4 +1574,10 @@ const styles = StyleSheet.create({
   rangeRow: { flexDirection: 'row', gap: theme.spacing.md },
   readonlyInput: { justifyContent: 'center', backgroundColor: theme.colors.surfaceTertiary },
   readonlyText: { ...theme.typography.body, color: theme.colors.textSecondary },
-});
+  noticeBanner: {
+    marginHorizontal: theme.spacing.lg, marginBottom: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.md, paddingVertical: 10,
+    borderRadius: theme.radius.md, backgroundColor: theme.colors.brandTertiary,
+    borderWidth: 1, borderColor: 'rgba(212,175,55,0.35)',
+  },
+  noticeBannerText: { ...theme.typography.footnote, color: theme.colors.brand },});

@@ -42,6 +42,7 @@ from database import deal_rooms_collection, get_utc_now, matches_collection, use
 from deps import ai_rate_limit
 from models import DealRoomCreate
 from premium import require_premium
+from realtime import sio
 import gamification
 
 router = APIRouter(prefix="/api", tags=["deal-rooms"])
@@ -70,6 +71,37 @@ async def _with_participants(room: Dict[str, Any]) -> Dict[str, Any]:
         for member in members
     }
     return room
+
+
+async def _notify(room: Dict[str, Any], actor: Dict[str, Any], summary: str) -> None:
+    """
+    Tell the other founder something happened in the room.
+
+    Until now the room was silent: your cofounder could propose an equity split
+    and you would find out by happening to open that tab. Chat and project
+    applications already emit; this closes the gap.
+
+    One event type rather than one per action. The client's response is the same
+    either way — refetch the room, show the sentence — and ten event names would
+    be ten things to keep in sync for no gain. `summary` is a phrase completing
+    "<name> …", so the client does not need to know what happened to say it.
+    """
+    actor_id = actor["user_id"]
+    actor_name = (actor.get("profile") or {}).get("name") or "Your cofounder"
+
+    for participant in room.get("participants", []):
+        if participant == actor_id:
+            continue
+        await sio.emit(
+            "deal_room_updated",
+            {
+                "room_id": room.get("room_id"),
+                "match_id": room.get("match_id"),
+                "actor_id": actor_id,
+                "summary": f"{actor_name} {summary}",
+            },
+            room=f"user:{participant}",
+        )
 
 
 async def _touch(room_id: str, **set_fields: Any) -> None:
@@ -173,6 +205,70 @@ async def generate_roadmap(
     await _touch(room_id, roadmap=roadmap)
 
     return roadmap
+
+class RoadmapImport(BaseModel):
+    """Which phase of the generated roadmap to turn into tasks."""
+    phase_index: int = Field(ge=0, le=20)
+
+
+@router.post("/deal-rooms/{room_id}/roadmap/import")
+async def import_roadmap_phase(
+    room_id: str,
+    payload: RoadmapImport,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Turn one roadmap phase into real tasks.
+
+    The generated roadmap was a document beside the task list, not connected to
+    it: the AI produced phases full of tasks, and the founders retyped them by
+    hand. This is the missing link that makes generating one worth doing.
+
+    One phase at a time, because importing a whole 90-day plan drops twenty
+    items into a list nobody then wants to look at.
+
+    Titles already present are skipped, so pressing the button twice — or both
+    founders pressing it — does not duplicate the phase.
+    """
+    room = await require_room_participant(room_id, current_user["user_id"])
+
+    phases = (room.get("roadmap") or {}).get("phases") or []
+    if payload.phase_index >= len(phases):
+        raise HTTPException(status_code=404, detail="That phase does not exist")
+
+    phase = phases[payload.phase_index]
+    existing_titles = {
+        (t.get("title") or "").strip().lower() for t in room.get("tasks") or []
+    }
+
+    created = []
+    for title in phase.get("tasks") or []:
+        clean = str(title).strip()
+        if not clean or clean.lower() in existing_titles:
+            continue
+        existing_titles.add(clean.lower())
+        created.append({
+            "task_id": f"task_{uuid.uuid4().hex[:12]}",
+            "title": clean[:200],
+            "description": f"From roadmap phase: {phase.get('name', '')}".strip(),
+            # Unassigned: the roadmap says what, not who, and guessing here would
+            # hand one founder the whole phase.
+            "assigned_to": None,
+            "completed": False,
+            "created_at": get_utc_now(),
+        })
+
+    if not created:
+        return {"created": [], "skipped": True}
+
+    await deal_rooms_collection.update_one(
+        {"room_id": room_id},
+        {"$push": {"tasks": {"$each": created}}, "$set": {"updated_at": get_utc_now()}},
+    )
+    await _notify(room, current_user, f"imported {len(created)} tasks from the roadmap")
+
+    return {"created": created, "skipped": False}
+
 
 class TaskCreate(BaseModel):
     title: str
@@ -296,7 +392,7 @@ async def add_document(
     current_user: dict = Depends(get_current_user),
 ):
     """Attach a document to the room, by link or by uploaded file."""
-    await require_room_participant(room_id, current_user["user_id"])
+    room = await require_room_participant(room_id, current_user["user_id"])
 
     has_link = bool(document.url and document.url.strip())
     has_file = bool(document.storage_key and document.storage_key.strip())
@@ -339,6 +435,11 @@ async def add_document(
     await deal_rooms_collection.update_one(
         {"room_id": room_id},
         {"$push": {"documents": entry}, "$set": {"updated_at": get_utc_now()}},
+    )
+    await _notify(
+        room,
+        current_user,
+        f'{"uploaded" if has_file else "shared"} a document: "{entry["title"]}"',
     )
     return entry
 
@@ -436,7 +537,7 @@ async def add_objective(
     current_user: dict = Depends(get_current_user),
 ):
     """Add a shared objective to the room."""
-    await require_room_participant(room_id, current_user["user_id"])
+    room = await require_room_participant(room_id, current_user["user_id"])
 
     entry = {
         "objective_id": f"obj_{uuid.uuid4().hex[:12]}",
@@ -451,6 +552,7 @@ async def add_objective(
         {"room_id": room_id},
         {"$push": {"objectives": entry}, "$set": {"updated_at": get_utc_now()}},
     )
+    await _notify(room, current_user, f'added an objective: "{entry["title"]}"')
     return entry
 
 
@@ -602,6 +704,9 @@ async def add_decision(
         {"room_id": room_id},
         {"$push": {"decisions": entry}, "$set": {"updated_at": get_utc_now()}},
     )
+    await _notify(
+        room, current_user, f'proposed a decision: "{entry["title"]}" — your sign-off is needed'
+    )
     return entry
 
 
@@ -627,6 +732,8 @@ async def agree_to_decision(
     target["status"] = _agreement_status(agreed, room["participants"])
 
     await _touch(room_id, decisions=decisions)
+    if target["status"] == "agreed":
+        await _notify(room, current_user, f'agreed to "{target["title"]}" — it is now settled')
     return target
 
 
@@ -690,6 +797,14 @@ async def propose_equity(
     }
 
     await _touch(room_id, equity_split=equity)
+    mine = equity["splits"].get(user_id)
+    await _notify(
+        room,
+        current_user,
+        f"proposed an equity split — {round(100 - (mine or 0), 2)}% to you, "
+        "vesting over "
+        f"{proposal.vesting_months} months",
+    )
     return equity
 
 
@@ -715,6 +830,8 @@ async def accept_equity(
         equity.setdefault("agreed_at", get_utc_now())
 
     await _touch(room_id, equity_split=equity)
+    if equity["status"] == "agreed":
+        await _notify(room, current_user, "accepted the equity split — you are both agreed")
     return equity
 
 

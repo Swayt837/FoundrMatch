@@ -159,12 +159,6 @@ class APIClient {
     });
   }
 
-  /**
-   * Authorise one image upload and get the URL to PUT it to.
-   *
-   * 503 here means the server has no object storage configured; callers treat
-   * that as "store the image inline instead" rather than as a failure.
-   */
   /** Authorise a document upload into a room, and get the URL to PUT it to. */
   async createDocumentUpload(roomId: string, filename: string, contentType: string) {
     return this.request(`/deal-rooms/${roomId}/documents/upload-url`, {
@@ -183,6 +177,12 @@ class APIClient {
     return this.request(`/deal-rooms/${roomId}/documents/${documentId}/download`);
   }
 
+  /**
+   * Authorise one image upload and get the URL to PUT it to.
+   *
+   * 503 here means the server has no object storage configured; callers treat
+   * that as "store the image inline instead" rather than as a failure.
+   */
   async createPhotoUpload(contentType: string) {
     return this.request('/uploads/photo', {
       method: 'POST',
@@ -291,6 +291,13 @@ class APIClient {
     return this.request(`/projects/${projectId}/apply`, { method: 'DELETE' });
   }
 
+  /** Turn one generated roadmap phase into real tasks in the room. */
+  async importRoadmapPhase(roomId: string, phaseIndex: number) {
+    return this.request(`/deal-rooms/${roomId}/roadmap/import`, {
+      method: 'POST',
+      body: JSON.stringify({ phase_index: phaseIndex }),
+    });
+  }
   // Objectives — outcomes the pair is aiming for, as opposed to tasks.
   async addDealRoomObjective(roomId: string, objective: { title: string; target_date?: string }) {
     return this.request(`/deal-rooms/${roomId}/objectives`, {

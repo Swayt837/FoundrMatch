@@ -276,6 +276,13 @@ export function useDealRoomActions(matchId: string, roomId?: string) {
     onSuccess: invalidate,
   });
 
+  /** Turn one roadmap phase into real tasks. Skips titles already in the list. */
+  const importRoadmapPhase = useMutation({
+    mutationFn: (phaseIndex: number) =>
+      api.importRoadmapPhase(roomId as string, phaseIndex),
+    onSuccess: invalidate,
+  });
+
   const addObjective = useMutation({
     mutationFn: (payload: { title: string; target_date?: string }) =>
       api.addDealRoomObjective(roomId as string, payload),
@@ -373,6 +380,7 @@ export function useDealRoomActions(matchId: string, roomId?: string) {
     addTask,
     toggleTask,
     generateRoadmap,
+    importRoadmapPhase,
     addObjective,
     toggleObjective,
     removeObjective,
