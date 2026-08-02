@@ -119,7 +119,8 @@ class TestSchemasAreValidForStructuredOutputs:
             TypeAdapter(ai_service_module.DeepReportPayload).json_schema()
         )
 
-        assert "Founder A should ask" in transformed["properties"]["questions_to_ask"]["description"]
+        description = transformed["properties"]["questions_to_ask"]["description"]
+        assert "second person" in description
 
 
 class _FakeMessage:
@@ -252,3 +253,29 @@ class TestTextExtraction:
         result = run(service.business_copilot("How do I price this?", {}))
 
         assert result == "Price it per seat."
+
+
+def test_narrative_prompt_speaks_to_the_reader():
+    """
+    The prompt used to label the two people "Founder A" and "Founder B", and the
+    model echoed that straight into a paragraph shown next to someone's face.
+    """
+    import inspect
+    import ai_service as m
+
+    source = inspect.getsource(m.AIService.explain_compatibility)
+    assert "Founder A" not in source and "Founder B" not in source
+    assert "_first_name(profile2)" in source
+
+    report = inspect.getsource(m.AIService.deep_compatibility_report)
+    assert "Founder A" not in report and "Founder B" not in report
+
+
+def test_first_name_takes_only_the_first_token():
+    import ai_service as m
+
+    assert m._first_name({"name": "Sarah Chen"}) == "Sarah"
+    assert m._first_name({"name": "  Jean-Pierre Dupont "}) == "Jean-Pierre"
+    # A placeholder the model would echo verbatim is worse than a neutral phrase.
+    assert m._first_name({}) == "this founder"
+    assert m._first_name({"name": "   "}) == "this founder"

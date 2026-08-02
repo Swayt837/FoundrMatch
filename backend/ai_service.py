@@ -56,6 +56,19 @@ EFFORT_STANDARD = "medium"
 EFFORT_DEEP = "high"
 
 
+def _first_name(profile: Dict[str, Any]) -> str:
+    """
+    What to call the other founder in a narrative.
+
+    First name only: the analysis is read on a card next to that person's face,
+    and "Sarah brings the technical half" reads like a person where "Founder B
+    brings the technical half" reads like a spreadsheet. Falls back to a neutral
+    phrase rather than to a placeholder the model would echo verbatim.
+    """
+    name = (profile.get("name") or "").strip()
+    return name.split()[0] if name else "this founder"
+
+
 def _report_profile(profile: Dict[str, Any]) -> Dict[str, Any]:
     """
     The subset of a profile the report prompt should see.
@@ -83,7 +96,10 @@ class ExplanationPayload(BaseModel):
     explanation: str = Field(
         min_length=1,
         max_length=2000,
-        description="Two to three sentences addressed to Founder A about Founder B.",
+        description=(
+            "Two to three sentences written to the reader in the second person "
+            "('you'), about the other founder, referred to by their first name."
+        ),
     )
 
 
@@ -106,7 +122,10 @@ class DeepReportPayload(BaseModel):
     risks: List[ReportRisk] = Field(default_factory=list)
     questions_to_ask: List[str] = Field(
         default_factory=list,
-        description="Questions Founder A should ask Founder B before committing.",
+        description=(
+            "Questions to ask the other founder before committing, written in the "
+            "second person and naming them."
+        ),
     )
     unknowns: List[str] = Field(
         default_factory=list,
@@ -259,9 +278,12 @@ class AIService:
         the model is unavailable; callers fall back to the factual summary from
         `compatibility.summarize`.
         """
-        prompt = f"""Two founders have been matched by a scoring engine. Explain the pairing to them.
+        other = _first_name(profile2)
 
-Founder A:
+        prompt = f"""You are writing to a founder about someone a scoring engine has matched
+them with. Address them directly as "you"; call the other founder {other}.
+
+The reader (you):
 - Profession: {profile1.get('profession')}
 - Skills: {', '.join(profile1.get('skills') or []) or 'not specified'}
 - Experience: {profile1.get('experience')}
@@ -270,7 +292,7 @@ Founder A:
 - Work style: {', '.join(profile1.get('work_style') or []) or 'not specified'}
 - Values: {', '.join(profile1.get('values') or []) or 'not specified'}
 
-Founder B:
+{other}:
 - Profession: {profile2.get('profession')}
 - Skills: {', '.join(profile2.get('skills') or []) or 'not specified'}
 - Experience: {profile2.get('experience')}
@@ -288,10 +310,11 @@ Computed scores (0-100), which you must treat as given:
 - Working chemistry: {scores.get('personality_score')}
 - Overall: {scores.get('overall_score')}
 
-Write 2-3 sentences addressed to Founder A about Founder B. Ground every claim in the
-data above. Name the strongest dimension and, if any score is below 50, name that
-tension honestly rather than glossing over it. Do not invent facts, do not restate
-the numbers, and do not use bullet points."""
+Write 2-3 sentences in the second person, naming {other} rather than describing them
+as "the other founder". Ground every claim in the data above. Name the strongest
+dimension and, if any score is below 50, name that tension honestly rather than
+glossing over it. Do not invent facts, do not restate the numbers, and do not use
+bullet points."""
 
         result = await self._ask_json(
             label="compatibility-explanation",
@@ -320,11 +343,13 @@ the numbers, and do not use bullet points."""
         most demanding analysis in the app, so it runs at high effort — one call per
         request, premium only, cached by pair.
         """
-        prompt = f"""Two founders are considering building a company together. Produce a candid
-due-diligence read on the pairing for Founder A.
+        other = _first_name(profile2)
 
-Founder A: {json.dumps(_report_profile(profile1), ensure_ascii=False)}
-Founder B: {json.dumps(_report_profile(profile2), ensure_ascii=False)}
+        prompt = f"""A founder is considering building a company with someone. Produce a candid
+due-diligence read for them. Address them as "you"; call the other founder {other}.
+
+You: {json.dumps(_report_profile(profile1), ensure_ascii=False)}
+{other}: {json.dumps(_report_profile(profile2), ensure_ascii=False)}
 
 Computed compatibility scores (0-100), treat as given: {json.dumps(scores, ensure_ascii=False)}
 

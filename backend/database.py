@@ -122,6 +122,18 @@ async def run_migrations():
     if rescored:
         print(f"✅ Migration: rescored {rescored} match(es) with the current engine")
 
+    # Narratives written before the prompt spoke in the second person still say
+    # "Founder A" and "Founder B". They are cached per pair and never expire, so
+    # without this every existing pairing would keep showing the old wording
+    # forever. Dropping them costs one LLM call the next time a profile is opened.
+    result = await db.compatibility_cache.update_many(
+        {"$or": [{"explanation": {"$exists": True}}, {"report": {"$exists": True}}],
+         "narrative_version": {"$ne": 2}},
+        {"$unset": {"explanation": "", "report": ""}, "$set": {"narrative_version": 2}},
+    )
+    if result.modified_count:
+        print(f"✅ Migration: cleared {result.modified_count} stale AI narrative(s)")
+
 
 async def rescore_matches(query: Dict[str, Any]) -> int:
     """
