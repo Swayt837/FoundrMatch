@@ -21,12 +21,12 @@ from database import (
     users_collection,
 )
 from entitlements import FREE_MAX_MATCHES, premium_active
+from matches import ensure_match
 from models import SwipeAction
 from moderation import assert_not_blocked, blocked_user_ids
 from quotas import claim_daily_swipe
 from realtime import sio
 from serializers import PUBLIC_USER_PROJECTION, public_user
-import gamification
 
 router = APIRouter(prefix="/api", tags=["discovery"])
 
@@ -180,44 +180,23 @@ async def swipe(
                         ),
                     )
 
-            # It's a match!
+            # It's a match! Scoring, storage and the notification all live in
+            # `matches.ensure_match`, shared with the project-application route —
+            # a pair connected through a posting has to end up with exactly the
+            # same object as one that swiped, or everything downstream has two
+            # cases to handle.
             target_user = await users_collection.find_one(
                 {"user_id": target_id},
                 PUBLIC_USER_PROJECTION
             )
 
-            # Score the pair. Deterministic and instant, so the match is created in
-            # the same request instead of waiting on an LLM round trip.
-            compatibility = score_compatibility(
-                current_user.get("profile") or {},
-                (target_user or {}).get("profile") or {},
-            )
-
-            # Create match
-            match_data = {
-                "match_id": f"match_{user_id[:6]}_{target_id[:6]}_{get_utc_now().timestamp()}",
-                "user1_id": user_id,
-                "user2_id": target_id,
-                "compatibility_score": compatibility,
-                "status": "matched",
-                "created_at": get_utc_now()
-            }
-            await matches_collection.insert_one(match_data)
-
-            await gamification.award_many([user_id, target_id], "matches_count")
-
-            # Notify the other side in real time if they have a socket open
-            await sio.emit("new_match", {
-                "match_id": match_data["match_id"],
-                "user": public_user(current_user),
-                "compatibility": compatibility,
-            }, room=f"user:{target_id}")
+            match_data, _ = await ensure_match(current_user, target_id, origin="swipe")
 
             return {
                 "matched": True,
                 "match_id": match_data["match_id"],
                 "user": public_user(target_user),
-                "compatibility": compatibility,
+                "compatibility": match_data["compatibility_score"],
                 "swipes_used_today": swipes_today,
             }
 

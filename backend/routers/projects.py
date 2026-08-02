@@ -8,7 +8,9 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 
 from auth import get_current_user
 from database import get_utc_now, projects_collection, users_collection
+from matches import ensure_match
 from models import ProjectApplication, ProjectCreate
+from rate_limit import RateLimiter
 from moderation import assert_not_blocked, blocked_user_ids
 from realtime import sio
 from serializers import PUBLIC_USER_PROJECTION, public_user
@@ -17,12 +19,29 @@ import gamification
 router = APIRouter(prefix="/api", tags=["projects"])
 
 
-@router.post("/projects/create")
+@router.post(
+    "/projects/create",
+    dependencies=[Depends(RateLimiter("projects", limit=5, window=3600))],
+)
 async def create_project(
     data: ProjectCreate,
     current_user: dict = Depends(get_current_user)
 ):
-    """Create a project posting"""
+    """
+    Create a project posting.
+
+    Two gates that were missing. Posting is rate limited, because nothing
+    stopped one account from filling the board. And it requires a finished
+    profile: the discovery feed already refuses to show anyone who has not
+    completed onboarding, so without this a founder could advertise for a
+    cofounder while giving applicants nothing to judge them on.
+    """
+    if not current_user.get("onboarding_completed"):
+        raise HTTPException(
+            status_code=403,
+            detail="Complete your profile before posting an opportunity",
+        )
+
     project_data = {
         "project_id": f"proj_{get_utc_now().timestamp()}",
         "user_id": current_user["user_id"],
@@ -221,6 +240,141 @@ async def get_project_applicants(
             if users_by_id.get(a["user_id"])
         ]
     }
+
+@router.delete("/projects/{project_id}/apply")
+async def withdraw_application(
+    project_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Take back an application.
+
+    Applying was one-way: a founder who changed their mind, or applied by
+    mistake, stayed on the owner's list with no way off it.
+    """
+    project = await projects_collection.find_one({"project_id": project_id})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    user_id = current_user["user_id"]
+    mine = next(
+        (a for a in project.get("applicants") or [] if a.get("user_id") == user_id), None
+    )
+    if not mine:
+        raise HTTPException(status_code=404, detail="You have not applied to this project")
+    if mine.get("status") == "accepted":
+        raise HTTPException(
+            status_code=400,
+            detail="This application was accepted; use the conversation to step back",
+        )
+
+    await projects_collection.update_one(
+        {"project_id": project_id},
+        {"$pull": {"applicants": {"user_id": user_id}}, "$set": {"updated_at": get_utc_now()}},
+    )
+    return {"withdrawn": True, "project_id": project_id}
+
+
+async def _set_applicant_status(project_id: str, user_id: str, status: str) -> None:
+    await projects_collection.update_one(
+        {"project_id": project_id, "applicants.user_id": user_id},
+        {
+            "$set": {
+                "applicants.$.status": status,
+                "applicants.$.decided_at": get_utc_now(),
+                "updated_at": get_utc_now(),
+            }
+        },
+    )
+
+
+@router.post("/projects/{project_id}/applicants/{applicant_id}/accept")
+async def accept_applicant(
+    project_id: str,
+    applicant_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Accept an applicant, and open a conversation with them.
+
+    This is the whole point of the tab. Applications used to be written with a
+    status of "pending" that nothing ever changed: the owner saw a list and
+    could do nothing with it — not accept, not decline, and above all not talk
+    to anyone. The feature ended there.
+
+    Accepting creates a match, which is what gives the pair a chat and, if they
+    go further, a deal room. The same object a reciprocal swipe produces, so
+    everything downstream works without knowing how they met.
+    """
+    project = await projects_collection.find_one({"project_id": project_id})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project["user_id"] != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    applicant = next(
+        (a for a in project.get("applicants") or [] if a.get("user_id") == applicant_id),
+        None,
+    )
+    if not applicant:
+        raise HTTPException(status_code=404, detail="Applicant not found")
+
+    # A block either way since they applied is a refusal to connect.
+    await assert_not_blocked(current_user["user_id"], applicant_id)
+
+    match, created = await ensure_match(current_user, applicant_id, origin="project")
+    await _set_applicant_status(project_id, applicant_id, "accepted")
+
+    await sio.emit(
+        "application_accepted",
+        {
+            "project_id": project_id,
+            "project_title": project.get("title"),
+            "match_id": match["match_id"],
+        },
+        room=f"user:{applicant_id}",
+    )
+
+    return {
+        "accepted": True,
+        "match_id": match["match_id"],
+        "match_created": created,
+        "applicant_id": applicant_id,
+    }
+
+
+@router.post("/projects/{project_id}/applicants/{applicant_id}/decline")
+async def decline_applicant(
+    project_id: str,
+    applicant_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Decline an applicant.
+
+    Recorded rather than silently dropped: someone who answered a posting is
+    owed an answer, and an application left pending forever is the worst of the
+    three outcomes.
+    """
+    project = await projects_collection.find_one({"project_id": project_id})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project["user_id"] != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    if not any(a.get("user_id") == applicant_id for a in project.get("applicants") or []):
+        raise HTTPException(status_code=404, detail="Applicant not found")
+
+    await _set_applicant_status(project_id, applicant_id, "declined")
+
+    await sio.emit(
+        "application_declined",
+        {"project_id": project_id, "project_title": project.get("title")},
+        room=f"user:{applicant_id}",
+    )
+
+    return {"declined": True, "applicant_id": applicant_id}
+
 
 @router.patch("/projects/{project_id}/status")
 async def update_project_status(
