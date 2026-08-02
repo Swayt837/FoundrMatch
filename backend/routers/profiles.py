@@ -10,7 +10,7 @@ from pydantic import ValidationError
 import personality
 from auth import get_current_user
 from database import get_utc_now, rescore_matches_for, users_collection
-from models import OnboardingData, PersonalityAnswers, PhotosUpload
+from models import OnboardingData, PersonalityAnswers, PhotosUpload, ShowcaseUpdate
 from moderation import assert_not_blocked
 from serializers import PUBLIC_USER_PROJECTION, private_user, public_user
 
@@ -89,6 +89,36 @@ async def upload_photos(
     )
 
     return {"message": "Photos uploaded", "count": len(payload.photos)}
+
+@router.put("/profile/showcase")
+async def update_showcase(
+    payload: ShowcaseUpdate,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Replace the showcase — what this founder has built.
+
+    A whole-list replace rather than add/remove endpoints, because order is part
+    of the content: the first item is what someone sees first, and reordering
+    through individual mutations is three round trips and a race between two
+    devices.
+
+    Deliberately not scored. What a founder shows says a great deal to a human
+    reader and nothing an algorithm should be weighting, so this does not
+    invalidate the compatibility cache the way editing skills does.
+    """
+    await users_collection.update_one(
+        {"user_id": current_user["user_id"]},
+        {"$set": {
+            "profile.showcase": [
+                {**item.model_dump(), "kind": item.kind} for item in payload.items
+            ],
+            "updated_at": get_utc_now(),
+        }},
+    )
+
+    return {"showcase": payload.items, "count": len(payload.items)}
+
 
 @router.get("/profile/{user_id}")
 async def get_profile(

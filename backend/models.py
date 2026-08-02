@@ -182,6 +182,70 @@ class PhotosUpload(BaseModel):
         return photos
 
 
+class ShowcaseItem(BaseModel):
+    """
+    One thing a founder has built.
+
+    Separate from `photos`, which are pictures of the person. The two answer
+    different questions — "who am I dealing with" and "what have they actually
+    shipped" — and merging them is how a swipe card ends up leading with a
+    revenue chart instead of a face.
+
+    `kind` is derived from the URL rather than trusted from the client, so a
+    video cannot be declared an image to skip the thumbnail requirement.
+    """
+    url: str = Field(min_length=1, max_length=2000)
+    caption: str = Field(default="", max_length=140)
+    # Videos need a still to render in a grid; without one every tile would have
+    # to download a video file just to show something.
+    thumbnail_url: Optional[str] = Field(default=None, max_length=2000)
+    duration_seconds: Optional[float] = Field(default=None, ge=0, le=600)
+
+    @property
+    def kind(self) -> str:
+        return "video" if _looks_like_video(self.url) else "image"
+
+
+VIDEO_EXTENSIONS = (".mp4", ".mov")
+
+
+def _looks_like_video(url: str) -> bool:
+    return url.lower().split("?")[0].endswith(VIDEO_EXTENSIONS)
+
+
+class ShowcaseUpdate(BaseModel):
+    """The full showcase list, replacing whatever was there."""
+    items: List[ShowcaseItem] = Field(default_factory=list, max_length=8)
+
+    @field_validator("items")
+    @classmethod
+    def check_items(cls, items: List[ShowcaseItem]) -> List[ShowcaseItem]:
+        import storage
+
+        for item in items:
+            # Same rule as profile photos: only URLs this deployment produced.
+            # An arbitrary URL in a profile turns every viewer into a request to
+            # someone else's server, carrying their IP address.
+            if not storage.is_managed_url(item.url):
+                raise ValueError(
+                    "Showcase items must be uploaded through /api/uploads/showcase"
+                )
+            if item.thumbnail_url and not storage.is_managed_url(item.thumbnail_url):
+                raise ValueError("Thumbnails must be uploaded the same way")
+
+            if _looks_like_video(item.url):
+                if not item.thumbnail_url:
+                    raise ValueError("A video needs a thumbnail")
+                if (
+                    item.duration_seconds is not None
+                    and item.duration_seconds > storage.MAX_SHOWCASE_VIDEO_SECONDS
+                ):
+                    raise ValueError(
+                        f"Videos must be under {storage.MAX_SHOWCASE_VIDEO_SECONDS} seconds"
+                    )
+        return items
+
+
 class PersonalityAnswers(BaseModel):
     """
     Personality assessment submission: `{question_id: 1..5}`.

@@ -63,6 +63,43 @@ async def create_photo_upload(
         raise HTTPException(status_code=status, detail=str(exc))
 
 
+class ShowcaseUploadRequest(BaseModel):
+    content_type: str = "image/jpeg"
+
+
+@router.post(
+    "/uploads/showcase",
+    dependencies=[Depends(RateLimiter("uploads", limit=40, window=60))],
+)
+async def create_showcase_upload(
+    payload: ShowcaseUploadRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Authorise one showcase upload — a screenshot, or a short video of the thing
+    working.
+
+    Same authorisation shape as a photo, different limits: video is allowed here
+    and images are not the only thing a founder needs to show.
+    """
+    if not storage.configured():
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Object storage is not configured on this server. Missing: "
+                + ", ".join(storage.missing_settings())
+            ),
+        )
+
+    try:
+        return storage.presign_showcase_upload(
+            current_user["user_id"], payload.content_type
+        )
+    except storage.StorageError as exc:
+        status = 400 if "Unsupported type" in str(exc) else 502
+        raise HTTPException(status_code=status, detail=str(exc))
+
+
 @router.post(
     "/uploads/selftest",
     dependencies=[Depends(RateLimiter("uploads_selftest", limit=6, window=300))],

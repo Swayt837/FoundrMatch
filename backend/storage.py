@@ -59,6 +59,28 @@ CONTENT_TYPES = {
 
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 
+# ===== Showcase: what a founder has built =====
+#
+# Kept apart from profile photos, which are pictures of the person. A screenshot
+# of a landing page and a portrait answer different questions, and mixing them in
+# one array is how the swipe card ends up leading with a bar chart.
+#
+# Video is allowed because a 20-second screen recording of a working product says
+# something no screenshot does — but only short ones. This is scrolled on mobile
+# data, and a founder who uploads a three-minute pitch is not going to be watched
+# either way.
+SHOWCASE_CONTENT_TYPES = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+    "video/mp4": "mp4",
+    "video/quicktime": "mov",
+}
+
+MAX_SHOWCASE_IMAGE_BYTES = 5 * 1024 * 1024
+MAX_SHOWCASE_VIDEO_BYTES = 50 * 1024 * 1024
+MAX_SHOWCASE_VIDEO_SECONDS = 60
+
 # Deal-room documents. Separate from photos in every respect: they are bigger,
 # they are not images, and they are private.
 #
@@ -205,6 +227,47 @@ def presign_photo_upload(user_id: str, content_type: str) -> Dict[str, object]:
         "expires_in": UPLOAD_URL_TTL,
         "headers": {"Content-Type": content_type},
         "max_bytes": MAX_UPLOAD_BYTES,
+    }
+
+
+def presign_showcase_upload(user_id: str, content_type: str) -> Dict[str, object]:
+    """
+    A one-shot URL for uploading one showcase image or video.
+
+    Public, like profile photos: a showcase exists to be seen by strangers
+    deciding whether to swipe. Deal-room documents are the opposite and go
+    through signed reads instead.
+
+    Its own key prefix, so a future "delete everything I have shown" is one
+    prefix listing rather than a scan of the user document.
+    """
+    if content_type not in SHOWCASE_CONTENT_TYPES:
+        raise StorageError(
+            f"Unsupported type {content_type!r}; expected one of "
+            + ", ".join(sorted(SHOWCASE_CONTENT_TYPES))
+        )
+
+    extension = SHOWCASE_CONTENT_TYPES[content_type]
+    key = f"showcase/{user_id}/{uuid.uuid4().hex}.{extension}"
+    is_video = content_type.startswith("video/")
+
+    try:
+        url = client().generate_presigned_url(
+            "put_object",
+            Params={"Bucket": R2_BUCKET, "Key": key, "ContentType": content_type},
+            ExpiresIn=UPLOAD_URL_TTL,
+        )
+    except (BotoCoreError, ClientError) as exc:
+        raise StorageError(f"Could not sign upload: {exc}") from exc
+
+    return {
+        "upload_url": url,
+        "public_url": public_url(key),
+        "key": key,
+        "expires_in": UPLOAD_URL_TTL,
+        "headers": {"Content-Type": content_type},
+        "max_bytes": MAX_SHOWCASE_VIDEO_BYTES if is_video else MAX_SHOWCASE_IMAGE_BYTES,
+        "max_duration_seconds": MAX_SHOWCASE_VIDEO_SECONDS if is_video else None,
     }
 
 
