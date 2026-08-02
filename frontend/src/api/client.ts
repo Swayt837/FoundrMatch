@@ -297,6 +297,22 @@ class APIClient {
     });
   }
 
+  /** Attach this device's push token to the signed-in account. */
+  async registerPushToken(token: string, platform: string) {
+    return this.request('/push/register', {
+      method: 'POST',
+      body: JSON.stringify({ token, platform }),
+    });
+  }
+
+  /** Detach it, so a shared device stops delivering this account's matches. */
+  async unregisterPushToken(token: string) {
+    return this.request('/push/register', {
+      method: 'DELETE',
+      body: JSON.stringify({ token, platform: 'unknown' }),
+    });
+  }
+
   /** Accept an applicant. Creates a match, so the pair gets a conversation. */
   async acceptApplicant(projectId: string, applicantId: string) {
     return this.request(`/projects/${projectId}/applicants/${applicantId}/accept`, {

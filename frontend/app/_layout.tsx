@@ -7,7 +7,8 @@ import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { IncomingCallListener } from '@/src/components/IncomingCallListener';
-import { AuthProvider } from '@/src/contexts/AuthContext';
+import { AuthProvider, useAuth } from '@/src/contexts/AuthContext';
+import { usePushNotifications } from '@/src/hooks/use-push-notifications';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import * as SplashScreen from 'expo-splash-screen';
 import { Asset } from 'expo-asset';
@@ -40,6 +41,16 @@ const prewarmAssets = async () => {
   }
 };
 
+/**
+ * Lives inside AuthProvider so it can see who is signed in — a push token is
+ * registered against an account, not a device.
+ */
+function PushRegistrar() {
+  const { user } = useAuth();
+  usePushNotifications(user?.user_id);
+  return null;
+}
+
 export default function RootLayout() {
   useEffect(() => {
     async function prepare() {
@@ -63,6 +74,7 @@ export default function RootLayout() {
             {/* Mounted once, above the navigator: the server rings a user's personal
                 socket room, so a call must be answerable from any screen. */}
             <IncomingCallListener />
+            <PushRegistrar />
             <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.colors.surface } }}>
               <Stack.Screen name="index" />
               <Stack.Screen name="auth/welcome" />

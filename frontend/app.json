@@ -1,86 +1,95 @@
-﻿{
-  "expo": {
-    "name": "CoFoundr",
-    "slug": "cofound",
-    "version": "1.0.0",
-    "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
-    "scheme": "cofoundr",
-    "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
-    "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "fr.boutot.cofoundr",
-      "bitcode": false,
-      "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
-      }
-    },
-    "android": {
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#000000"
-      },
-      "edgeToEdgeEnabled": true,
-      "package": "fr.boutot.cofoundr",
-      "permissions": [
-        "android.permission.INTERNET",
-        "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO",
-        "android.permission.MODIFY_AUDIO_SETTINGS",
-        "android.permission.ACCESS_NETWORK_STATE",
-        "android.permission.SYSTEM_ALERT_WINDOW",
-        "android.permission.WAKE_LOCK",
-        "android.permission.BLUETOOTH"
-      ]
-    },
-    "web": {
-      "bundler": "metro",
-      "output": "single",
-      "favicon": "./assets/images/favicon.png"
-    },
-    "plugins": [
-      "expo-router",
-      [
-        "expo-splash-screen",
-        {
-          "image": "./assets/images/splash-image.png",
-          "imageWidth": 200,
-          "resizeMode": "contain",
-          "backgroundColor": "#000000"
-        }
-      ],
-      [
-        "expo-image-picker",
-        {
-          "photosPermission": "CoFoundr needs access to your photos so you can add pictures to your founder profile.",
-          "cameraPermission": "CoFoundr uses your camera for video calls with founders you have matched with, and to take your profile photo.",
-          "microphonePermission": "CoFoundr uses your microphone so you can be heard during audio and video calls with founders you have matched with."
-        }
-      ],
-      [
-        "@config-plugins/react-native-webrtc",
-        {
-          "cameraPermission": "CoFoundr uses your camera for video calls with founders you have matched with, and to take your profile photo.",
-          "microphonePermission": "CoFoundr uses your microphone so you can be heard during audio and video calls with founders you have matched with."
-        }
-      ]
-    ],
-    "experiments": {
-      "typedRoutes": true
-    },
-    "extra": {
-      "router": {},
-      "eas": {
-        "projectId": "f42074c8-1600-4408-90ad-aa24a895ed52"
-      }
-    },
-    "owner": "flo837",
-    "runtimeVersion": {
-      "policy": "appVersion"
-    },
-    "updates": {
-      "url": "https://u.expo.dev/f42074c8-1600-4408-90ad-aa24a895ed52"
-    }
-  }
+{
+    "expo":  {
+                 "name":  "CoFoundr",
+                 "slug":  "cofound",
+                 "version":  "1.0.0",
+                 "orientation":  "portrait",
+                 "icon":  "./assets/images/icon.png",
+                 "scheme":  "cofoundr",
+                 "userInterfaceStyle":  "automatic",
+                 "newArchEnabled":  true,
+                 "ios":  {
+                             "supportsTablet":  true,
+                             "bundleIdentifier":  "fr.boutot.cofoundr",
+                             "bitcode":  false,
+                             "infoPlist":  {
+                                               "ITSAppUsesNonExemptEncryption":  false
+                                           }
+                         },
+                 "android":  {
+                                 "adaptiveIcon":  {
+                                                      "foregroundImage":  "./assets/images/adaptive-icon.png",
+                                                      "backgroundColor":  "#000000"
+                                                  },
+                                 "edgeToEdgeEnabled":  true,
+                                 "package":  "fr.boutot.cofoundr",
+                                 "permissions":  [
+                                                     "android.permission.INTERNET",
+                                                     "android.permission.CAMERA",
+                                                     "android.permission.RECORD_AUDIO",
+                                                     "android.permission.MODIFY_AUDIO_SETTINGS",
+                                                     "android.permission.ACCESS_NETWORK_STATE",
+                                                     "android.permission.SYSTEM_ALERT_WINDOW",
+                                                     "android.permission.WAKE_LOCK",
+                                                     "android.permission.BLUETOOTH"
+                                                 ]
+                             },
+                 "web":  {
+                             "bundler":  "metro",
+                             "output":  "single",
+                             "favicon":  "./assets/images/favicon.png"
+                         },
+                 "plugins":  [
+                                 "expo-router",
+                                 [
+                                     "expo-splash-screen",
+                                     {
+                                         "image":  "./assets/images/splash-image.png",
+                                         "imageWidth":  200,
+                                         "resizeMode":  "contain",
+                                         "backgroundColor":  "#000000"
+                                     }
+                                 ],
+                                 [
+                                     "expo-image-picker",
+                                     {
+                                         "photosPermission":  "CoFoundr needs access to your photos so you can add pictures to your founder profile.",
+                                         "cameraPermission":  "CoFoundr uses your camera for video calls with founders you have matched with, and to take your profile photo.",
+                                         "microphonePermission":  "CoFoundr uses your microphone so you can be heard during audio and video calls with founders you have matched with."
+                                     }
+                                 ],
+                                 [
+                                     "@config-plugins/react-native-webrtc",
+                                     {
+                                         "cameraPermission":  "CoFoundr uses your camera for video calls with founders you have matched with, and to take your profile photo.",
+                                         "microphonePermission":  "CoFoundr uses your microphone so you can be heard during audio and video calls with founders you have matched with."
+                                     }
+                                 ],
+                                 [
+                                     "expo-notifications",
+                                     {
+                                         "color":  "#D4AF37",
+                                         "defaultChannel":  "default"
+                                     }
+                                 ]
+                             ],
+                 "experiments":  {
+                                     "typedRoutes":  true
+                                 },
+                 "extra":  {
+                               "router":  {
+
+                                          },
+                               "eas":  {
+                                           "projectId":  "f42074c8-1600-4408-90ad-aa24a895ed52"
+                                       }
+                           },
+                 "owner":  "flo837",
+                 "runtimeVersion":  {
+                                        "policy":  "appVersion"
+                                    },
+                 "updates":  {
+                                 "url":  "https://u.expo.dev/f42074c8-1600-4408-90ad-aa24a895ed52"
+                             }
+             }
 }
