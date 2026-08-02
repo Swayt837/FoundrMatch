@@ -217,6 +217,25 @@ class APIClient {
     return this.request('/uploads/config');
   }
 
+  /** Authorise a showcase upload — an image, or a short video. */
+  async createShowcaseUpload(contentType: string) {
+    return this.request('/uploads/showcase', {
+      method: 'POST',
+      body: JSON.stringify({ content_type: contentType }),
+    });
+  }
+
+  /**
+   * Replace the showcase. A whole-list PUT because order is content — the first
+   * item is what someone sees first.
+   */
+  async updateShowcase(items: unknown[]) {
+    return this.request('/profile/showcase', {
+      method: 'PUT',
+      body: JSON.stringify({ items }),
+    });
+  }
+
   async uploadPhotos(photos: string[]) {
     // Wrapped in an object: the endpoint expects a JSON body `{ photos: [...] }`.
     return this.request('/profile/photos', {

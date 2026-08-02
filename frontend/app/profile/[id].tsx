@@ -33,6 +33,8 @@ import {
   Award,
   Flag,
   Languages as LanguagesIcon,
+  Rocket,
+  Play,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { api, ApiError } from '@/src/api/client';
@@ -42,6 +44,7 @@ import {
   useUserProfile,
 } from '@/src/api/queries';
 import { useAuth } from '@/src/contexts/AuthContext';
+import { ShowcaseViewer, type ShowcaseItem } from '@/src/components/ShowcaseViewer';
 import { theme } from '@/src/theme';
 
 const PLACEHOLDER =
@@ -56,6 +59,8 @@ export default function ProfileDetailScreen() {
   const { user: me } = useAuth();
 
   const [activePhoto, setActivePhoto] = useState(0);
+
+  const [viewer, setViewer] = useState<ShowcaseItem | null>(null);
   // Errors raised by an action (block, report), as opposed to a failed load.
   const [actionError, setActionError] = useState<string | null>(null);
   const [reportError, setReportError] = useState<string | null>(null);
@@ -381,6 +386,42 @@ export default function ProfileDetailScreen() {
             </Section>
           ) : null}
 
+          {/* What they've built. Placed above skills on purpose: a screenshot of
+              something working outweighs a list of technologies claimed. */}
+          {profile.showcase?.length > 0 && (
+            <Section
+              title="What they've built"
+              icon={<Rocket size={14} color={theme.colors.brand} strokeWidth={2} />}
+            >
+              <View style={styles.showcaseGrid}>
+                {profile.showcase.map((item: any, i: number) => (
+                  <TouchableOpacity
+                    key={i}
+                    style={styles.showcaseTile}
+                    activeOpacity={0.85}
+                    onPress={() => setViewer(item)}
+                    testID={`profile-showcase-${i}`}
+                  >
+                    <Image
+                      source={{ uri: item.thumbnail_url || item.url }}
+                      style={styles.showcaseImage}
+                    />
+                    {item.kind === 'video' && (
+                      <View style={styles.showcasePlay} pointerEvents="none">
+                        <Play size={16} color={theme.colors.text} strokeWidth={2} fill={theme.colors.text} />
+                      </View>
+                    )}
+                    {!!item.caption && (
+                      <Text style={styles.showcaseCaption} numberOfLines={2}>
+                        {item.caption}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </Section>
+          )}
+
           {/* Skills */}
           {profile.skills?.length > 0 && (
             <Section title="Skills" icon={<Zap size={14} color={theme.colors.brand} strokeWidth={2} />}>
@@ -484,6 +525,8 @@ export default function ProfileDetailScreen() {
           </View>
         </View>
       </ScrollView>
+
+      <ShowcaseViewer item={viewer} onClose={() => setViewer(null)} />
     </View>
   );
 }
@@ -834,4 +877,20 @@ const styles = StyleSheet.create({
     ...theme.typography.caption,
     color: theme.colors.textSecondary,
   },
-});
+  showcaseGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: theme.spacing.sm },
+  showcaseTile: { width: '48%' },
+  showcaseImage: {
+    width: '100%', aspectRatio: 16 / 10, borderRadius: theme.radius.md,
+    backgroundColor: theme.colors.surfaceSecondary,
+  },
+  showcasePlay: {
+    position: 'absolute', top: '32%', alignSelf: 'center',
+    width: 34, height: 34, borderRadius: 17,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(9,9,11,0.6)',
+    borderWidth: 1, borderColor: 'rgba(250,250,250,0.3)',
+  },
+  showcaseCaption: {
+    ...theme.typography.caption, color: theme.colors.textSecondary,
+    marginTop: 6, lineHeight: 16,
+  },});

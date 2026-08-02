@@ -8,9 +8,10 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { ArrowLeft, Camera, X, Check } from 'lucide-react-native';
+import { ArrowLeft, Camera, X, Check, Plus, Play, ArrowUp, ArrowDown } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { storablePhoto } from '@/src/utils/photos';
+import { pickAndUploadShowcase, type ShowcaseUpload } from '@/src/utils/showcase';
 import * as Haptics from 'expo-haptics';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { api } from '@/src/api/client';
@@ -29,6 +30,9 @@ export default function ProfileEditScreen() {
   const [skills, setSkills] = useState<string[]>(p.skills || []);
   const [skillInput, setSkillInput] = useState('');
   const [photos, setPhotos] = useState<string[]>(p.photos || []);
+  const [showcase, setShowcase] = useState<ShowcaseUpload[]>(p.showcase || []);
+  const [addingShowcase, setAddingShowcase] = useState(false);
+  const [showcaseError, setShowcaseError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const haptic = () => {
@@ -66,12 +70,42 @@ export default function ProfileEditScreen() {
     if (stored) setPhotos([...photos, stored]);
   };
 
+  const addShowcase = async () => {
+    setShowcaseError(null);
+    setAddingShowcase(true);
+    try {
+      const item = await pickAndUploadShowcase();
+      if (item) setShowcase([...showcase, item]);
+    } catch (e: any) {
+      setShowcaseError(e?.detail || e?.message || 'Could not add that item');
+    } finally {
+      setAddingShowcase(false);
+    }
+  };
+
+  const setCaption = (index: number, caption: string) => {
+    setShowcase(showcase.map((item, i) => (i === index ? { ...item, caption } : item)));
+  };
+
+  const moveShowcase = (index: number, delta: number) => {
+    const target = index + delta;
+    if (target < 0 || target >= showcase.length) return;
+    const next = [...showcase];
+    [next[index], next[target]] = [next[target], next[index]];
+    setShowcase(next);
+    haptic();
+  };
+
   const save = async () => {
     setSaving(true);
     try {
       if (Platform.OS !== 'web') {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
+      // Separate call: the showcase is replaced whole and, unlike skills, does
+      // not feed the compatibility engine, so it does not go through the
+      // profile update that invalidates every cached score.
+      await api.updateShowcase(showcase);
       await api.updateProfile({
         name,
         bio,
@@ -144,6 +178,94 @@ export default function ProfileEditScreen() {
                 </TouchableOpacity>
               )}
             </View>
+            <Text style={styles.hint}>
+              The first photo is what founders see on your card.
+            </Text>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>WHAT YOU&apos;VE BUILT</Text>
+            <Text style={styles.hint}>
+              Screenshots, a traction chart, or a short video of the product
+              working. This is what turns a profile into evidence.
+            </Text>
+
+            <View style={styles.showcaseList}>
+              {showcase.map((item, i) => (
+                <View key={item.url} style={styles.showcaseRow}>
+                  <View>
+                    <Image
+                      source={{ uri: item.thumbnail_url || item.url }}
+                      style={styles.showcaseThumb}
+                    />
+                    {item.kind === 'video' && (
+                      <View style={styles.showcasePlay} pointerEvents="none">
+                        <Play size={12} color={theme.colors.text} strokeWidth={2} fill={theme.colors.text} />
+                      </View>
+                    )}
+                  </View>
+
+                  <View style={styles.flex}>
+                    <TextInput
+                      style={styles.captionInput}
+                      placeholder="Say what this is…"
+                      placeholderTextColor={theme.colors.textSecondary}
+                      value={item.caption}
+                      maxLength={140}
+                      onChangeText={(text) => setCaption(i, text)}
+                      testID={`showcase-caption-${i}`}
+                    />
+                    <View style={styles.showcaseActions}>
+                      {/* Order is content — the first item is seen first — so it
+                          has to be changeable without deleting and re-uploading. */}
+                      <TouchableOpacity
+                        onPress={() => moveShowcase(i, -1)}
+                        disabled={i === 0}
+                        style={[styles.moveBtn, i === 0 && styles.moveBtnOff]}
+                        testID={`showcase-up-${i}`}
+                      >
+                        <ArrowUp size={13} color={theme.colors.textSecondary} strokeWidth={2} />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={() => moveShowcase(i, 1)}
+                        disabled={i === showcase.length - 1}
+                        style={[styles.moveBtn, i === showcase.length - 1 && styles.moveBtnOff]}
+                        testID={`showcase-down-${i}`}
+                      >
+                        <ArrowDown size={13} color={theme.colors.textSecondary} strokeWidth={2} />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={() => setShowcase(showcase.filter((_, idx) => idx !== i))}
+                        style={styles.moveBtn}
+                        testID={`showcase-remove-${i}`}
+                      >
+                        <X size={13} color={theme.colors.errorOn} strokeWidth={2} />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                </View>
+              ))}
+            </View>
+
+            {showcase.length < 8 && (
+              <TouchableOpacity
+                style={[styles.showcaseAdd, addingShowcase && styles.showcaseAddBusy]}
+                onPress={addShowcase}
+                disabled={addingShowcase}
+                testID="showcase-add"
+              >
+                {addingShowcase ? (
+                  <ActivityIndicator color={theme.colors.brand} />
+                ) : (
+                  <>
+                    <Plus size={16} color={theme.colors.brand} strokeWidth={2.5} />
+                    <Text style={styles.showcaseAddText}>Add image or video</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            )}
+
+            {showcaseError && <Text style={styles.showcaseError}>{showcaseError}</Text>}
           </View>
 
           <View style={styles.section}>
@@ -331,4 +453,38 @@ const styles = StyleSheet.create({
     color: theme.colors.brandOn,
     fontWeight: '500',
   },
-});
+  hint: {
+    ...theme.typography.caption, color: theme.colors.textSecondary,
+    marginTop: theme.spacing.sm, lineHeight: 17,
+  },
+  showcaseList: { gap: theme.spacing.sm, marginTop: theme.spacing.md },
+  showcaseRow: {
+    flexDirection: 'row', gap: theme.spacing.md, alignItems: 'center',
+    padding: theme.spacing.sm, borderRadius: theme.radius.md,
+    backgroundColor: theme.colors.surfaceSecondary,
+    borderWidth: 1, borderColor: theme.colors.border,
+  },
+  showcaseThumb: { width: 64, height: 64, borderRadius: theme.radius.sm, backgroundColor: theme.colors.surfaceTertiary },
+  showcasePlay: {
+    position: 'absolute', top: 22, left: 22, width: 20, height: 20, borderRadius: 10,
+    alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(9,9,11,0.6)',
+  },
+  captionInput: {
+    ...theme.typography.subhead, color: theme.colors.text,
+    paddingVertical: 6, paddingHorizontal: 0,
+  },
+  showcaseActions: { flexDirection: 'row', gap: theme.spacing.sm, marginTop: 4 },
+  moveBtn: {
+    width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: theme.colors.border,
+  },
+  moveBtnOff: { opacity: 0.35 },
+  showcaseAdd: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: theme.spacing.sm,
+    paddingVertical: 14, marginTop: theme.spacing.md,
+    borderRadius: theme.radius.md, borderWidth: 1, borderStyle: 'dashed',
+    borderColor: theme.colors.border,
+  },
+  showcaseAddBusy: { opacity: 0.6 },
+  showcaseAddText: { ...theme.typography.callout, color: theme.colors.brand, fontWeight: '600' },
+  showcaseError: { ...theme.typography.caption, color: theme.colors.errorOn, marginTop: theme.spacing.sm },});
