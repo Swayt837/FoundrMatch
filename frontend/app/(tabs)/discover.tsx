@@ -9,6 +9,7 @@ import {
   TouchableOpacity,
   Animated,
   PanResponder,
+  Pressable,
   ActivityIndicator,
   Image,
   useWindowDimensions,
@@ -20,7 +21,8 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { useRouter } from 'expo-router';
-import { X, Heart, Zap, MapPin, Briefcase, Clock, Sparkles, Info, SlidersHorizontal, Check } from 'lucide-react-native';
+import { X, Heart, Zap, MapPin, Briefcase, Clock, Sparkles, Info,
+  Play, SlidersHorizontal, Check } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { api, ApiError } from '@/src/api/client';
@@ -80,6 +82,7 @@ export default function DiscoverScreen() {
   const [matchModal, setMatchModal] = useState<MatchModal>({ visible: false, user: null, compatibility: null, matchId: '' });
   const [filters, setFilters] = useState<DiscoverFilters>({});
   const [showFilters, setShowFilters] = useState(false);
+  const [mediaIndex, setMediaIndex] = useState(0);
   const position = useRef(new Animated.ValueXY()).current;
 
   const activeFilterCount = Object.values(filters).filter(v => v).length;
@@ -96,6 +99,12 @@ export default function DiscoverScreen() {
   useEffect(() => {
     setCurrentIndex(0);
   }, [data]);
+
+  // Each card starts on its first photo; without this the next founder opens on
+  // whichever slide the previous one was left at.
+  useEffect(() => {
+    setMediaIndex(0);
+  }, [currentIndex]);
 
   const reloadCards = useCallback(() => {
     setCurrentIndex(0);
@@ -183,7 +192,12 @@ export default function DiscoverScreen() {
 
   const panResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
+      // Not on touch-down: the card carries tap targets now — the media zones and
+      // the strip that opens the profile — and claiming the gesture immediately
+      // would swallow every one of them. Claim it once the finger actually moves.
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, gesture) =>
+        Math.abs(gesture.dx) > 8 || Math.abs(gesture.dy) > 8,
       onPanResponderMove: (_, gesture) => {
         position.setValue({ x: gesture.dx, y: gesture.dy * 0.3 });
       },
@@ -278,7 +292,32 @@ export default function DiscoverScreen() {
   const cardUser = currentCard.user;
   const profile = cardUser.profile;
   const compatibility = currentCard.compatibility;
-  const photoUri = profile.photos?.[0] || PLACEHOLDER_IMAGE;
+  /**
+   * What the card can page through: the person first, then what they built.
+   *
+   * `photos[0]` leads unconditionally. A founder deciding whether to swipe is
+   * looking at a person, and a card that opens on a revenue chart has answered
+   * the wrong question.
+   */
+  const media: { url: string; kind: 'image' | 'video'; caption?: string }[] = [
+    ...(profile.photos || []).map((url: string) => ({ url, kind: 'image' as const })),
+    ...(profile.showcase || []).map((item: any) => ({
+      // A video is represented by its still here; it plays on the full profile.
+      url: item.kind === 'video' ? item.thumbnail_url || item.url : item.url,
+      kind: item.kind === 'video' ? ('video' as const) : ('image' as const),
+      caption: item.caption,
+    })),
+  ];
+
+  const currentMedia = media[Math.min(mediaIndex, Math.max(media.length - 1, 0))];
+  const mediaUri = currentMedia?.url || PLACEHOLDER_IMAGE;
+
+  /** Page through the card's media, stopping at each end rather than wrapping. */
+  const stepMedia = (delta: number) => {
+    if (media.length < 2) return;
+    setMediaIndex((current) => Math.max(0, Math.min(media.length - 1, current + delta)));
+    if (Platform.OS !== 'web') Haptics.selectionAsync();
+  };
 
   const rotate = position.x.interpolate({
     inputRange: [-winWidth / 2, 0, winWidth / 2],
@@ -363,8 +402,48 @@ export default function DiscoverScreen() {
             ]}
             testID="discover-card"
           >
-          <Image source={{ uri: photoUri }} style={styles.cardImage} />
-          
+          <Image source={{ uri: mediaUri }} style={styles.cardImage} />
+
+          {/* A video shows its still here and plays on the full profile: a deck
+              that autoplays video burns data on cards about to be discarded. */}
+          {currentMedia?.kind === 'video' && (
+            <View style={styles.playBadge} pointerEvents="none">
+              <Play size={22} color={theme.colors.text} strokeWidth={2} fill={theme.colors.text} />
+            </View>
+          )}
+
+          {/* Segment bar, one per item, so the card announces there is more to see */}
+          {media.length > 1 && (
+            <View style={styles.segments} pointerEvents="none">
+              {media.map((_, i) => (
+                <View
+                  key={i}
+                  style={[styles.segment, i === mediaIndex && styles.segmentActive]}
+                />
+              ))}
+            </View>
+          )}
+
+          {/* Tap zones. Left and right page through the media, the bottom band
+              opens the profile — the arrangement people already know from every
+              other swipe app, and the reason the pan responder no longer claims
+              the gesture on touch-down. */}
+          <Pressable
+            style={styles.tapLeft}
+            onPress={() => stepMedia(-1)}
+            testID="discover-media-prev"
+          />
+          <Pressable
+            style={styles.tapRight}
+            onPress={() => stepMedia(1)}
+            testID="discover-media-next"
+          />
+          <Pressable
+            style={styles.tapBottom}
+            onPress={() => openProfileDetail(cardUser.user_id)}
+            testID="discover-open-profile"
+          />
+
           {/* Gradient scrim */}
           <LinearGradient
             colors={['transparent', 'rgba(9,9,11,0.4)', 'rgba(9,9,11,0.95)']}
@@ -1195,4 +1274,45 @@ const styles = StyleSheet.create({
     ...theme.typography.subhead,
     color: theme.colors.textSecondary,
   },
+
+  // Segment bar: one bar per media item, so a card with more to show says so
+  // before anyone has to guess.
+  segments: {
+    position: 'absolute',
+    top: 10,
+    left: 12,
+    right: 12,
+    flexDirection: 'row',
+    gap: 4,
+    zIndex: 6,
+  },
+  segment: {
+    flex: 1,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: 'rgba(250,250,250,0.28)',
+  },
+  segmentActive: { backgroundColor: theme.colors.text },
+
+  playBadge: {
+    position: 'absolute',
+    alignSelf: 'center',
+    top: '42%',
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(9,9,11,0.55)',
+    borderWidth: 1,
+    borderColor: 'rgba(250,250,250,0.35)',
+    zIndex: 6,
+  },
+
+  // Tap zones, invisible and sitting under the info block so they never cover
+  // the name or the badges. Left and right page the media; the bottom band
+  // opens the profile.
+  tapLeft: { position: 'absolute', top: 0, left: 0, bottom: '32%', width: '33%', zIndex: 5 },
+  tapRight: { position: 'absolute', top: 0, right: 0, bottom: '32%', width: '33%', zIndex: 5 },
+  tapBottom: { position: 'absolute', left: 0, right: 0, bottom: 0, height: '32%', zIndex: 5 },
 });
