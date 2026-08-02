@@ -431,6 +431,10 @@ async def add_document(
         entry["storage_key"] = key
         entry["filename"] = (document.filename or document.title).strip()
         entry["size_bytes"] = document.size_bytes
+        entry["version"] = 1
+        entry["history"] = []
+        entry["signed_by"] = []
+        entry["signature_status"] = "unsigned"
 
     await deal_rooms_collection.update_one(
         {"room_id": room_id},
@@ -444,10 +448,130 @@ async def add_document(
     return entry
 
 
+class DocumentVersion(BaseModel):
+    """A replacement file for an existing document."""
+    storage_key: str = Field(min_length=1, max_length=500)
+    filename: Optional[str] = Field(default=None, max_length=255)
+    size_bytes: Optional[int] = Field(default=None, ge=0)
+
+
+@router.post("/deal-rooms/{room_id}/documents/{document_id}/versions")
+async def add_document_version(
+    room_id: str,
+    document_id: str,
+    payload: DocumentVersion,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Replace a document's file, keeping the one it replaces.
+
+    Revising a contract used to mean deleting and re-uploading, which threw away
+    the record of what had been agreed and when — precisely what you keep a
+    legal document for.
+
+    **Signatures reset.** Both founders having signed version 1 says nothing
+    about version 2, and carrying agreement across a change of content is how a
+    signature stops meaning anything. Same rule as the equity tab, where a new
+    proposal withdraws the previous acceptance.
+    """
+    room = await require_room_participant(room_id, current_user["user_id"])
+
+    documents = room.get("documents") or []
+    target = next((d for d in documents if d.get("document_id") == document_id), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if target.get("kind") != "file":
+        raise HTTPException(status_code=400, detail="Only uploaded files have versions")
+
+    key = payload.storage_key.strip()
+    if not key.startswith(f"rooms/{room_id}/"):
+        raise HTTPException(status_code=400, detail="Unknown upload reference")
+
+    # The outgoing file joins the history rather than being deleted — the point
+    # of the feature is that it stays readable.
+    history = list(target.get("history") or [])
+    history.append({
+        "storage_key": target.get("storage_key"),
+        "filename": target.get("filename"),
+        "size_bytes": target.get("size_bytes"),
+        "replaced_at": get_utc_now(),
+        "replaced_by": current_user["user_id"],
+        "signed_by": list(target.get("signed_by") or []),
+    })
+
+    target.update({
+        "storage_key": key,
+        "filename": (payload.filename or target.get("filename") or "document").strip(),
+        "size_bytes": payload.size_bytes,
+        "version": len(history) + 1,
+        "history": history,
+        "signed_by": [],
+        "signature_status": "unsigned",
+        "updated_at": get_utc_now(),
+        "updated_by": current_user["user_id"],
+    })
+
+    await _touch(room_id, documents=documents)
+    await _notify(
+        room,
+        current_user,
+        f'replaced "{target["title"]}" with a new version — previous signatures no longer apply',
+    )
+    return target
+
+
+@router.post("/deal-rooms/{room_id}/documents/{document_id}/sign")
+async def sign_document(
+    room_id: str,
+    document_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Sign a document. Idempotent — signing twice changes nothing.
+
+    This is an audit trail, not a qualified electronic signature: it records
+    that both founders pressed the button on this exact version, with a
+    timestamp. That is worth having between two people acting in good faith,
+    and it is not what a court would want for a shareholders' agreement. The
+    client is expected to say so rather than imply otherwise.
+    """
+    room = await require_room_participant(room_id, current_user["user_id"])
+    user_id = current_user["user_id"]
+
+    documents = room.get("documents") or []
+    target = next((d for d in documents if d.get("document_id") == document_id), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if target.get("kind") != "file":
+        raise HTTPException(status_code=400, detail="Only uploaded files can be signed")
+
+    signatures = list(target.get("signed_by") or [])
+    if not any(s.get("user_id") == user_id for s in signatures):
+        signatures.append({"user_id": user_id, "signed_at": get_utc_now()})
+
+    signed_ids = {s["user_id"] for s in signatures}
+    fully_signed = set(room["participants"]).issubset(signed_ids)
+
+    target["signed_by"] = signatures
+    target["signature_status"] = "signed" if fully_signed else "partially_signed"
+    if fully_signed:
+        target.setdefault("signed_at", get_utc_now())
+
+    await _touch(room_id, documents=documents)
+    await _notify(
+        room,
+        current_user,
+        f'signed "{target["title"]}"'
+        + (" — you have both signed" if fully_signed else ", awaiting yours"),
+    )
+    return target
+
+
 @router.get("/deal-rooms/{room_id}/documents/{document_id}/download")
 async def download_document(
     room_id: str,
     document_id: str,
+    version: Optional[int] = None,
     current_user: dict = Depends(get_current_user),
 ):
     """
@@ -469,14 +593,28 @@ async def download_document(
     if target.get("kind") != "file" or not target.get("storage_key"):
         raise HTTPException(status_code=400, detail="This document is a link, open it directly")
 
+    # `version` addresses the history: what a document said when it was signed is
+    # the thing you go back for, so superseded files stay readable.
+    source = target
+    if version is not None and version != target.get("version", 1):
+        history = target.get("history") or []
+        if not 1 <= version <= len(history):
+            raise HTTPException(status_code=404, detail="That version does not exist")
+        source = history[version - 1]
+
     try:
         url = storage.presign_document_download(
-            target["storage_key"], target.get("filename") or target.get("title") or "document"
+            source["storage_key"], source.get("filename") or target.get("title") or "document"
         )
     except storage.StorageError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 
-    return {"url": url, "expires_in": storage.DOWNLOAD_URL_TTL, "filename": target.get("filename")}
+    return {
+        "url": url,
+        "expires_in": storage.DOWNLOAD_URL_TTL,
+        "filename": source.get("filename"),
+        "version": version or target.get("version", 1),
+    }
 
 
 @router.delete("/deal-rooms/{room_id}/documents/{document_id}")
@@ -512,8 +650,15 @@ async def remove_document(
         },
     )
 
-    if target.get("kind") == "file" and target.get("storage_key"):
-        storage.delete_document(target["storage_key"])
+    if target.get("kind") == "file":
+        # Every version, not just the current one. Leaving superseded files
+        # behind means a document a founder believes they removed is still
+        # readable to anyone holding an older signed URL.
+        for key in [target.get("storage_key")] + [
+            h.get("storage_key") for h in target.get("history") or []
+        ]:
+            if key:
+                storage.delete_document(key)
 
     return {"document_id": document_id, "removed": True}
 

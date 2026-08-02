@@ -352,37 +352,44 @@ def _candidate_endpoints() -> list:
     return [current] + [e for e in (default, eu) if e != current]
 
 
-def _probe(endpoint_url: str) -> Dict[str, object]:
-    """Write, head and delete one object through `endpoint_url`."""
+def _probe(endpoint_url: str, bucket: Optional[str] = None) -> Dict[str, object]:
+    """Write, head and delete one object in `bucket` through `endpoint_url`."""
+    target = bucket or R2_BUCKET
     key = f"selftest/{uuid.uuid4().hex}.txt"
     probe_client = _client_for(endpoint_url)
     try:
         probe_client.put_object(
-            Bucket=R2_BUCKET, Key=key, Body=b"ok", ContentType="text/plain"
+            Bucket=target, Key=key, Body=b"ok", ContentType="text/plain"
         )
     except ClientError as exc:
         error = exc.response.get("Error", {})
         return {
             "endpoint": endpoint_url,
+            "bucket": target,
             "write": "failed",
             "error_code": error.get("Code"),
             "error_message": error.get("Message"),
         }
     except BotoCoreError as exc:
-        return {"endpoint": endpoint_url, "write": "failed", "error_message": str(exc)}
+        return {
+            "endpoint": endpoint_url,
+            "bucket": target,
+            "write": "failed",
+            "error_message": str(exc),
+        }
 
     try:
-        probe_client.head_object(Bucket=R2_BUCKET, Key=key)
+        probe_client.head_object(Bucket=target, Key=key)
         read = "ok"
     except (BotoCoreError, ClientError) as exc:
         read = f"failed: {exc}"
 
     try:
-        probe_client.delete_object(Bucket=R2_BUCKET, Key=key)
+        probe_client.delete_object(Bucket=target, Key=key)
     except (BotoCoreError, ClientError):
         pass
 
-    return {"endpoint": endpoint_url, "write": "ok", "read": read}
+    return {"endpoint": endpoint_url, "bucket": target, "write": "ok", "read": read}
 
 
 def diagnose() -> Dict[str, object]:
@@ -435,6 +442,23 @@ def diagnose() -> Dict[str, object]:
             "where the error is AccessDenied, so check that the API token grants "
             "Object Read & Write on this bucket."
         )
+
+    # The documents bucket is probed separately, and this is the failure worth
+    # catching early: an R2 API token is scoped to named buckets, so adding a
+    # second bucket without widening the token leaves photos working and every
+    # document upload failing.
+    report["documents_bucket"] = documents_bucket()
+    if working and documents_bucket() != R2_BUCKET:
+        docs = _probe(working[0], documents_bucket())
+        report["documents"] = docs
+        if docs.get("write") != "ok":
+            report["documents_fix"] = (
+                f"The API token cannot write to {documents_bucket()!r}. R2 tokens "
+                "are scoped to specific buckets — reissue one covering both, or "
+                "unset R2_DOCS_BUCKET to keep documents in the photo bucket."
+            )
+    elif working:
+        report["documents"] = {"same_bucket_as_photos": True}
 
     return report
 
