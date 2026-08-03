@@ -12,6 +12,7 @@ Routers, in the order they are mounted:
     profiles                 onboarding, photos, profile read & edit
     uploads                  signed URLs for images going to object storage
     notifications           push token registration
+    verification            email, GitHub and website proofs
     discovery                swipe feed, swipes, matches
     chat                     message history, read receipts, sending
     calls                    WebRTC ICE configuration (signalling lives in realtime)
@@ -42,6 +43,7 @@ from routers import (
     projects,
     uploads,
     notifications,
+    verification,
 )
 
 load_dotenv()
@@ -84,6 +86,7 @@ app.include_router(auth_routes.router)
 app.include_router(profiles.router)
 app.include_router(uploads.router)
 app.include_router(notifications.router)
+app.include_router(verification.router)
 app.include_router(discovery.router)
 app.include_router(chat.router)
 app.include_router(calls.router)

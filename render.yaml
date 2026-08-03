@@ -70,6 +70,18 @@ services:
       - key: R2_DOCS_BUCKET
         sync: false
 
+      # --- Verification ---
+      # Email codes; without these the email method reports itself unavailable.
+      - key: RESEND_API_KEY
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+      # GitHub account ownership. No scopes are requested.
+      - key: GITHUB_CLIENT_ID
+        sync: false
+      - key: GITHUB_CLIENT_SECRET
+        sync: false
+
       # --- Claude ---
       - key: ANTHROPIC_API_KEY
         sync: false
