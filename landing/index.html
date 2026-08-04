@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CoFoundr — Meet the person you'll build your next company with</title>
+<meta name="description" content="CoFoundr matches founders on what actually decides a partnership: complementary skills, shared objectives, real availability. Then gives you the workspace to start.">
+
+<meta property="og:title" content="CoFoundr">
+<meta property="og:description" content="Meet the person you'll build your next company with.">
+<meta property="og:type" content="website">
+<meta name="theme-color" content="#09090B">
+
+<!-- Website verification: paste the tag the app gives you here, then confirm.
+     It has to be in the HTML the server sends — a tag added by JavaScript after
+     load is invisible to the check.
+     <meta name="cofoundr-verification" content="cofoundr-…"> -->
+
+<style>
+  /* The app's tokens, verbatim from src/theme/index.ts. A landing page that
+     drifts from the product it advertises reads as someone else's work. */
+  :root {
+    --ink: #09090B;
+    --ink-2: #18181B;
+    --ink-3: #27272A;
+    --text: #FAFAFA;
+    --muted: #A1A1AA;
+    --line: #27272A;
+    --gold: #D4AF37;
+    --gold-lit: #ECCD6E;
+    --gold-dim: #BA9226;
+
+    --measure: 1120px;
+    --step: clamp(1rem, 0.9rem + 0.5vw, 1.125rem);
+  }
+
+  * { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+
+  body {
+    margin: 0;
+    background: var(--ink);
+    color: var(--text);
+    font: var(--step)/1.6 -apple-system, BlinkMacSystemFont, "SF Pro Text",
+          "Segoe UI", Inter, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+
+  .wrap { max-width: var(--measure); margin: 0 auto; padding: 0 24px; }
+
+  a { color: inherit; }
+
+  /* ===== Navigation ===== */
+
+  header {
+    position: sticky; top: 0; z-index: 20;
+    background: rgba(9, 9, 11, 0.72);
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    border-bottom: 1px solid transparent;
+    transition: border-color .3s ease;
+  }
+  header.scrolled { border-bottom-color: var(--line); }
+
+  nav {
+    display: flex; align-items: center; justify-content: space-between;
+    height: 56px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+  .brand svg { width: 26px; height: 26px; display: block; }
+  .brand span { font-weight: 600; letter-spacing: -0.01em; font-size: 17px; }
+
+  .nav-links { display: flex; gap: 32px; font-size: 14px; color: var(--muted); }
+  .nav-links a { text-decoration: none; transition: color .2s; }
+  .nav-links a:hover { color: var(--text); }
+  @media (max-width: 720px) { .nav-links { display: none; } }
+
+  /* ===== Hero ===== */
+
+  .hero { padding: clamp(72px, 12vw, 140px) 0 clamp(56px, 8vw, 96px); text-align: center; }
+
+  .mark {
+    width: clamp(72px, 12vw, 104px); height: auto; margin: 0 auto 40px; display: block;
+    filter: drop-shadow(0 0 40px rgba(212, 175, 55, 0.22));
+  }
+
+  h1 {
+    margin: 0 0 24px;
+    font-size: clamp(2.4rem, 1.4rem + 4.4vw, 4.75rem);
+    line-height: 1.04;
+    letter-spacing: -0.035em;
+    font-weight: 600;
+    max-width: 15ch; margin-inline: auto;
+  }
+  h1 em {
+    font-style: normal;
+    background: linear-gradient(180deg, var(--gold-lit), var(--gold-dim));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+
+  .lede {
+    margin: 0 auto 40px; max-width: 54ch;
+    color: var(--muted); font-size: clamp(1.05rem, 1rem + 0.4vw, 1.3rem); line-height: 1.55;
+  }
+
+  /* ===== Store buttons ===== */
+
+  .stores { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+
+  .store {
+    display: inline-flex; align-items: center; gap: 12px;
+    padding: 13px 22px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--ink-2);
+    text-decoration: none; color: var(--text);
+    transition: border-color .2s, transform .2s, background .2s;
+  }
+  .store:hover { border-color: #3F3F46; background: var(--ink-3); transform: translateY(-1px); }
+  .store svg { width: 22px; height: 22px; flex: none; }
+  .store small { display: block; font-size: 10px; letter-spacing: .09em; color: var(--muted); text-transform: uppercase; }
+  .store strong { display: block; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+
+  /* Honest about not being live yet: a dead App Store button is worse than a
+     labelled one. */
+  .store[aria-disabled="true"] { opacity: .5; cursor: default; }
+  .store[aria-disabled="true"]:hover { transform: none; border-color: var(--line); background: var(--ink-2); }
+
+  .stores-note { margin: 20px 0 0; font-size: 13px; color: var(--muted); }
+
+  /* ===== Sections ===== */
+
+  section { padding: clamp(64px, 9vw, 116px) 0; border-top: 1px solid var(--line); }
+
+  .eyebrow {
+    margin: 0 0 14px; font-size: 12px; letter-spacing: .16em;
+    text-transform: uppercase; color: var(--gold); font-weight: 600;
+  }
+  h2 {
+    margin: 0 0 20px;
+    font-size: clamp(1.75rem, 1.3rem + 2vw, 2.9rem);
+    line-height: 1.12; letter-spacing: -0.028em; font-weight: 600;
+    max-width: 20ch;
+  }
+  .section-lede { margin: 0; max-width: 58ch; color: var(--muted); line-height: 1.65; }
+
+  .grid {
+    display: grid; gap: 20px; margin-top: 48px;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  }
+
+  .card {
+    padding: 28px; border-radius: 16px;
+    background: var(--ink-2); border: 1px solid var(--line);
+    transition: border-color .25s, transform .25s;
+  }
+  .card:hover { border-color: rgba(212, 175, 55, 0.3); transform: translateY(-2px); }
+  .card h3 { margin: 0 0 10px; font-size: 1.0625rem; font-weight: 600; letter-spacing: -0.01em; }
+  .card p { margin: 0; color: var(--muted); font-size: 0.9375rem; line-height: 1.6; }
+  .card .ic {
+    width: 38px; height: 38px; border-radius: 11px; margin-bottom: 18px;
+    display: grid; place-items: center;
+    background: rgba(212, 175, 55, 0.1); border: 1px solid rgba(212, 175, 55, 0.24);
+  }
+  .card .ic svg { width: 18px; height: 18px; stroke: var(--gold); fill: none;
+                  stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* ===== The scoring dimensions ===== */
+
+  .dims { display: grid; gap: 12px; margin-top: 44px; }
+  .dim {
+    display: grid; grid-template-columns: 1fr auto; align-items: center;
+    gap: 8px 20px; padding: 18px 0; border-bottom: 1px solid var(--line);
+  }
+  .dim:last-child { border-bottom: 0; }
+  .dim-name { font-weight: 500; letter-spacing: -0.01em; }
+  .dim-weight { color: var(--gold); font-variant-numeric: tabular-nums; font-size: 0.9375rem; }
+  .dim-bar { grid-column: 1 / -1; height: 3px; border-radius: 2px; background: var(--ink-3); overflow: hidden; }
+  .dim-bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--gold-dim), var(--gold-lit)); border-radius: 2px; }
+
+  /* ===== Closing ===== */
+
+  .close { text-align: center; }
+  .close h2 { margin-inline: auto; max-width: 18ch; }
+
+  footer { padding: 56px 0 72px; border-top: 1px solid var(--line); color: var(--muted); font-size: 14px; }
+  .foot-row { display: flex; justify-content: space-between; gap: 28px; flex-wrap: wrap; align-items: center; }
+  .foot-links { display: flex; gap: 26px; flex-wrap: wrap; }
+  .foot-links a { text-decoration: none; transition: color .2s; }
+  .foot-links a:hover { color: var(--text); }
+
+  /* ===== Entrance ===== */
+
+  .rise { opacity: 0; transform: translateY(18px); transition: opacity .7s ease, transform .7s ease; }
+  .rise.in { opacity: 1; transform: none; }
+</style>
+</head>
+<body>
+
+<header id="top-bar">
+  <div class="wrap">
+    <nav>
+      <a class="brand" href="#">
+        <svg viewBox="264 301 480 404" aria-hidden="true">
+          <defs>
+            <linearGradient id="g-nav" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#ECCD6E"/><stop offset="1" stop-color="#BA9226"/>
+            </linearGradient>
+          </defs>
+          <g fill="url(#g-nav)">
+            <circle cx="606" cy="418" r="84"/>
+            <path d="M468 705 A138 150 0 0 1 744 705 Z"/>
+          </g>
+          <g fill="none" stroke="#09090B" stroke-width="60">
+            <circle cx="424" cy="398" r="97"/>
+            <path d="M264 705 A160 175 0 0 1 584 705 Z"/>
+          </g>
+          <g fill="url(#g-nav)">
+            <circle cx="424" cy="398" r="97"/>
+            <path d="M264 705 A160 175 0 0 1 584 705 Z"/>
+          </g>
+        </svg>
+        <span>CoFoundr</span>
+      </a>
+      <div class="nav-links">
+        <a href="#matching">Matching</a>
+        <a href="#workspace">Workspace</a>
+        <a href="#trust">Trust</a>
+        <a href="#get">Get the app</a>
+      </div>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="wrap hero">
+    <svg class="mark" viewBox="264 301 480 404" aria-label="CoFoundr">
+      <defs>
+        <linearGradient id="g-hero" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#ECCD6E"/><stop offset="1" stop-color="#BA9226"/>
+        </linearGradient>
+      </defs>
+      <g fill="url(#g-hero)">
+        <circle cx="606" cy="418" r="84"/>
+        <path d="M468 705 A138 150 0 0 1 744 705 Z"/>
+      </g>
+      <g fill="none" stroke="#09090B" stroke-width="60">
+        <circle cx="424" cy="398" r="97"/>
+        <path d="M264 705 A160 175 0 0 1 584 705 Z"/>
+      </g>
+      <g fill="url(#g-hero)">
+        <circle cx="424" cy="398" r="97"/>
+        <path d="M264 705 A160 175 0 0 1 584 705 Z"/>
+      </g>
+    </svg>
+
+    <h1>Meet the person you'll <em>build</em> your next company with.</h1>
+
+    <p class="lede">
+      Most startups don't fail on the idea. They fail on the pairing.
+      CoFoundr matches founders on what actually decides a partnership — then
+      gives you the room to start building in.
+    </p>
+
+    <div class="stores" id="get">
+      <a class="store" aria-disabled="true" href="#get">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.4 12.8c0-2.2 1.8-3.3 1.9-3.3-1-1.5-2.6-1.7-3.2-1.7-1.4-.1-2.7.8-3.3.8-.7 0-1.7-.8-2.8-.8-1.5 0-2.8.8-3.6 2.1-1.5 2.7-.4 6.6 1.1 8.8.7 1 1.6 2.2 2.7 2.2 1.1 0 1.5-.7 2.8-.7s1.6.7 2.8.7c1.1 0 1.9-1.1 2.6-2.1.8-1.2 1.1-2.4 1.2-2.4-.1 0-2.2-.9-2.2-3.6zM14.3 5.6c.6-.7 1-1.7.9-2.6-.9 0-2 .6-2.6 1.3-.6.6-1 1.6-.9 2.6.9.1 2-.5 2.6-1.3z"/></svg>
+        <span><small>Coming soon</small><strong>App Store</strong></span>
+      </a>
+      <a class="store" aria-disabled="true" href="#get">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3.6 2.3c-.3.3-.5.8-.5 1.4v16.6c0 .6.2 1.1.5 1.4l.1.1 9.3-9.3v-.2L3.6 2.3zM16.2 15.1l-3.1-3.1v-.2l3.1-3.1.1.1 3.7 2.1c1 .6 1 1.6 0 2.2l-3.8 2zM15.9 15.4l-3.2-3.2-9.1 9.1c.3.4.9.4 1.5.1l10.8-6M15.9 8.6L5.1 2.5c-.6-.4-1.2-.3-1.5.1l9.1 9.1 3.2-3.1z"/></svg>
+        <span><small>Coming soon</small><strong>Google Play</strong></span>
+      </a>
+    </div>
+    <p class="stores-note">In private testing. Both stores at launch.</p>
+  </div>
+
+  <!-- ===== Matching ===== -->
+  <section id="matching">
+    <div class="wrap">
+      <p class="eyebrow rise">The matching engine</p>
+      <h2 class="rise">A number you can argue with.</h2>
+      <p class="section-lede rise">
+        Compatibility is computed, not guessed — six weighted dimensions, the same
+        arithmetic every time, so two founders who see 74% are looking at the same
+        thing. The AI doesn't produce the score. It explains it, in a sentence
+        addressed to you and naming the person you're reading about.
+      </p>
+
+      <div class="dims">
+        <div class="dim rise"><span class="dim-name">Complementary skills</span><span class="dim-weight">30%</span><span class="dim-bar"><i style="width:100%"></i></span></div>
+        <div class="dim rise"><span class="dim-name">Shared objectives</span><span class="dim-weight">20%</span><span class="dim-bar"><i style="width:67%"></i></span></div>
+        <div class="dim rise"><span class="dim-name">Vision &amp; values</span><span class="dim-weight">15%</span><span class="dim-bar"><i style="width:50%"></i></span></div>
+        <div class="dim rise"><span class="dim-name">Availability</span><span class="dim-weight">15%</span><span class="dim-bar"><i style="width:50%"></i></span></div>
+        <div class="dim rise"><span class="dim-name">Working style</span><span class="dim-weight">10%</span><span class="dim-bar"><i style="width:33%"></i></span></div>
+        <div class="dim rise"><span class="dim-name">Working chemistry</span><span class="dim-weight">10%</span><span class="dim-bar"><i style="width:33%"></i></span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Workspace ===== -->
+  <section id="workspace">
+    <div class="wrap">
+      <p class="eyebrow rise">Deal rooms</p>
+      <h2 class="rise">Matching is the easy part.</h2>
+      <p class="section-lede rise">
+        A match gives you a conversation. What you need next is somewhere to
+        disagree productively — and a record of what you agreed.
+      </p>
+
+      <div class="grid">
+        <div class="card rise">
+          <div class="ic"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></div>
+          <h3>Documents that stay yours</h3>
+          <p>Upload the agreement rather than linking someone's Drive. Versions are kept, and replacing one clears the signatures — because signing v1 says nothing about v2.</p>
+        </div>
+        <div class="card rise">
+          <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 2v20M2 12h20"/><circle cx="12" cy="12" r="9"/></svg></div>
+          <h3>Equity, settled in the open</h3>
+          <p>A split that must total 100% across exactly the two of you, with vesting and a cliff. Neither side can revise it without withdrawing the other's acceptance.</p>
+        </div>
+        <div class="card rise">
+          <div class="ic"><svg viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></div>
+          <h3>Decisions on the record</h3>
+          <p>Every decision needs sign-off from both founders. The point of a written log is that neither of you can later say you never agreed.</p>
+        </div>
+        <div class="card rise">
+          <div class="ic"><svg viewBox="0 0 24 24"><path d="M4 4h16v12H5.2L4 17.5z"/></svg></div>
+          <h3>A plan that becomes work</h3>
+          <p>A 90-day roadmap you can turn into real tasks in one tap, instead of a document you retype by hand.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Trust ===== -->
+  <section id="trust">
+    <div class="wrap">
+      <p class="eyebrow rise">Verification</p>
+      <h2 class="rise">You're about to discuss equity with a stranger.</h2>
+      <p class="section-lede rise">
+        Every badge is one less reason to hesitate — and we only issue the ones we
+        can actually prove. A LinkedIn address someone typed is shown as a link,
+        never as a checkmark, because the alternative devalues the badges that mean
+        something.
+      </p>
+
+      <div class="grid">
+        <div class="card rise">
+          <div class="ic"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><path d="m4 6 8 6 8-6"/></svg></div>
+          <h3>Email</h3>
+          <p>A code to the address on file. The floor for any account that will be handed a stranger's phone number.</p>
+        </div>
+        <div class="card rise">
+          <div class="ic"><svg viewBox="0 0 24 24"><path d="m4 17 6-6-6-6"/><path d="M12 19h8"/></svg></div>
+          <h3>GitHub</h3>
+          <p>Proves control of the account. No repository access is requested — ownership needs public data and nothing more.</p>
+        </div>
+        <div class="card rise">
+          <div class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20"/></svg></div>
+          <h3>Website</h3>
+          <p>A token placed on the domain claimed. Which is what "this is my company" means in practice.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Close ===== -->
+  <section class="close">
+    <div class="wrap">
+      <h2 class="rise">Find your cofounder.</h2>
+      <p class="section-lede rise" style="margin-inline:auto;text-align:center">
+        Free to start. Ten swipes a day, and every founder you match with.
+      </p>
+      <div class="stores rise" style="margin-top:36px">
+        <a class="store" aria-disabled="true" href="#get">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.4 12.8c0-2.2 1.8-3.3 1.9-3.3-1-1.5-2.6-1.7-3.2-1.7-1.4-.1-2.7.8-3.3.8-.7 0-1.7-.8-2.8-.8-1.5 0-2.8.8-3.6 2.1-1.5 2.7-.4 6.6 1.1 8.8.7 1 1.6 2.2 2.7 2.2 1.1 0 1.5-.7 2.8-.7s1.6.7 2.8.7c1.1 0 1.9-1.1 2.6-2.1.8-1.2 1.1-2.4 1.2-2.4-.1 0-2.2-.9-2.2-3.6zM14.3 5.6c.6-.7 1-1.7.9-2.6-.9 0-2 .6-2.6 1.3-.6.6-1 1.6-.9 2.6.9.1 2-.5 2.6-1.3z"/></svg>
+          <span><small>Coming soon</small><strong>App Store</strong></span>
+        </a>
+        <a class="store" aria-disabled="true" href="#get">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3.6 2.3c-.3.3-.5.8-.5 1.4v16.6c0 .6.2 1.1.5 1.4l.1.1 9.3-9.3v-.2L3.6 2.3zM16.2 15.1l-3.1-3.1v-.2l3.1-3.1.1.1 3.7 2.1c1 .6 1 1.6 0 2.2l-3.8 2zM15.9 15.4l-3.2-3.2-9.1 9.1c.3.4.9.4 1.5.1l10.8-6M15.9 8.6L5.1 2.5c-.6-.4-1.2-.3-1.5.1l9.1 9.1 3.2-3.1z"/></svg>
+          <span><small>Coming soon</small><strong>Google Play</strong></span>
+        </a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap foot-row">
+    <span>© <span id="year">2026</span> CoFoundr</span>
+    <div class="foot-links">
+      <!-- Required by both stores before submission. -->
+      <a href="/privacy">Privacy</a>
+      <a href="/terms">Terms</a>
+      <a href="mailto:hello@cofoundr.app">Contact</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+  document.getElementById('year').textContent = new Date().getFullYear();
+
+  // Hairline under the bar only once the page has moved, so the top of the page
+  // stays a single uninterrupted surface.
+  const bar = document.getElementById('top-bar');
+  const onScroll = () => bar.classList.toggle('scrolled', window.scrollY > 8);
+  onScroll();
+  addEventListener('scroll', onScroll, { passive: true });
+
+  // Entrance, staggered within a section. Reduced-motion users get the CSS
+  // override above, which leaves everything visible and still.
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach((entry, i) => {
+      if (!entry.isIntersecting) return;
+      setTimeout(() => entry.target.classList.add('in'), i * 70);
+      io.unobserve(entry.target);
+    });
+  }, { rootMargin: '0px 0px -8% 0px' });
+
+  document.querySelectorAll('.rise').forEach((el) => io.observe(el));
+</script>
+
+</body>
+</html>
