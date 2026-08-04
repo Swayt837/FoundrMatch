@@ -86,6 +86,7 @@ export default function RootLayout() {
               <Stack.Screen name="deal-room/[matchId]" options={{ presentation: 'card' }} />
               <Stack.Screen name="call/[matchId]" options={{ presentation: 'fullScreenModal' }} />
               <Stack.Screen name="profile/edit" options={{ presentation: 'modal' }} />
+              <Stack.Screen name="verify/index" options={{ presentation: 'card' }} />
               <Stack.Screen name="profile/[id]" options={{ presentation: 'card' }} />
               <Stack.Screen name="project/create" options={{ presentation: 'modal' }} />
               <Stack.Screen name="project/[id]" options={{ presentation: 'card' }} />

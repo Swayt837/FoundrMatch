@@ -57,7 +57,15 @@ export default function ProfileScreen() {
   const verification = user.verification || {};
   const photoUri = profile.photos?.[0] || PLACEHOLDER;
 
-  const verifiedCount = Object.values(verification).filter(Boolean).length;
+  // Only the three that are actually proved. The LinkedIn URL a founder typed
+  // lives in the same object but is a claim, and counting it here would be the
+  // first step towards rendering it as a badge.
+  const METHODS = [
+    { key: 'email_verified', label: 'Email' },
+    { key: 'github_verified', label: 'GitHub' },
+    { key: 'website_verified', label: 'Website' },
+  ] as const;
+  const verifiedCount = METHODS.filter((m) => (verification as any)[m.key]).length;
 
   return (
     <SafeAreaView style={styles.container} edges={[]} testID="profile-screen">
@@ -145,18 +153,17 @@ export default function ProfileScreen() {
             <Text style={styles.sectionTitle}>Verification</Text>
             <View style={styles.verifiedBadge}>
               <Shield size={11} color={theme.colors.brand} strokeWidth={2} />
-              <Text style={styles.verifiedText}>{verifiedCount}/5</Text>
+              <Text style={styles.verifiedText}>{verifiedCount}/{METHODS.length}</Text>
             </View>
           </View>
           <View style={styles.verificationList}>
-            {[
-              { key: 'email_verified', label: 'Email' },
-              { key: 'linkedin_verified', label: 'LinkedIn' },
-              { key: 'github_verified', label: 'GitHub' },
-              { key: 'portfolio_verified', label: 'Portfolio' },
-              { key: 'identity_verified', label: 'Identity' },
-            ].map((v) => (
-              <View key={v.key} style={styles.verificationRow}>
+            {METHODS.map((v) => (
+              <TouchableOpacity
+                key={v.key}
+                style={styles.verificationRow}
+                onPress={() => router.push('/verify' as never)}
+                testID={`profile-verify-${v.key}`}
+              >
                 <Text style={styles.verificationLabel}>{v.label}</Text>
                 {(verification as any)[v.key] ? (
                   <View style={styles.verifiedIcon}>
@@ -164,12 +171,9 @@ export default function ProfileScreen() {
                     <Text style={styles.verifiedIconText}>Verified</Text>
                   </View>
                 ) : (
-                  // No verification flow exists yet (no LinkedIn/GitHub OAuth, no
-                  // identity provider). A tappable "Verify" that did nothing read
-                  // as a broken button, so the pending state is stated plainly.
-                  <Text style={styles.verifyPending}>Coming soon</Text>
+                  <Text style={styles.verifyPending}>Verify</Text>
                 )}
-              </View>
+              </TouchableOpacity>
             ))}
           </View>
         </View>
@@ -237,7 +241,6 @@ export default function ProfileScreen() {
             )}
           </TouchableOpacity>
         </View>
-
         {/* Premium CTA */}
         <View style={styles.section}>
           {user?.premium ? (

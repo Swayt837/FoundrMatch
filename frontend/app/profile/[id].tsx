@@ -13,6 +13,7 @@ import {
   useWindowDimensions,
   Platform,
   Alert,
+  Linking,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -34,6 +35,8 @@ import {
   Flag,
   Languages as LanguagesIcon,
   Rocket,
+  ShieldCheck,
+  Check,
   Play,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
@@ -385,6 +388,52 @@ export default function ProfileDetailScreen() {
               <Text style={styles.bioText}>{profile.bio}</Text>
             </Section>
           ) : null}
+
+          {/* Verified badges. Only ones actually proved — the LinkedIn link a
+              founder typed is shown here as a link, never as a checkmark. */}
+          {(profile.verification?.email_verified ||
+            profile.verification?.github_verified ||
+            profile.verification?.website_verified ||
+            profile.verification?.linkedin_url) && (
+            <Section
+              title="Verified"
+              icon={<ShieldCheck size={14} color={theme.colors.brand} strokeWidth={2} />}
+            >
+              <View style={styles.pillWrap}>
+                {profile.verification.email_verified && (
+                  <View style={styles.verifiedPill}>
+                    <Check size={11} color={theme.colors.brand} strokeWidth={3} />
+                    <Text style={styles.verifiedPillText}>Email</Text>
+                  </View>
+                )}
+                {profile.verification.github_verified && (
+                  <View style={styles.verifiedPill}>
+                    <Check size={11} color={theme.colors.brand} strokeWidth={3} />
+                    <Text style={styles.verifiedPillText}>
+                      github.com/{profile.verification.github_username}
+                    </Text>
+                  </View>
+                )}
+                {profile.verification.website_verified && (
+                  <View style={styles.verifiedPill}>
+                    <Check size={11} color={theme.colors.brand} strokeWidth={3} />
+                    <Text style={styles.verifiedPillText}>
+                      {String(profile.verification.website_url).replace(/^https?:\/\//, '')}
+                    </Text>
+                  </View>
+                )}
+                {!!profile.verification.linkedin_url && (
+                  <TouchableOpacity
+                    style={styles.claimPill}
+                    onPress={() => Linking.openURL(profile.verification.linkedin_url)}
+                    testID="profile-linkedin"
+                  >
+                    <Text style={styles.claimPillText}>LinkedIn (unverified)</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </Section>
+          )}
 
           {/* What they've built. Placed above skills on purpose: a screenshot of
               something working outweighs a list of technologies claimed. */}
@@ -893,4 +942,27 @@ const styles = StyleSheet.create({
   showcaseCaption: {
     ...theme.typography.caption, color: theme.colors.textSecondary,
     marginTop: 6, lineHeight: 16,
-  },});
+  },
+
+  verifiedPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: 7,
+    borderRadius: theme.radius.pill,
+    backgroundColor: theme.colors.brandTertiary,
+    borderWidth: 1,
+    borderColor: 'rgba(212,175,55,0.35)',
+  },
+  verifiedPillText: { ...theme.typography.caption, color: theme.colors.brand, fontWeight: '600' },
+  // Visually distinct from a verified pill on purpose: it is a claim.
+  claimPill: {
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: 7,
+    borderRadius: theme.radius.pill,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  claimPillText: { ...theme.typography.caption, color: theme.colors.textSecondary },
+});

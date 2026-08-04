@@ -316,6 +316,59 @@ class APIClient {
     });
   }
 
+  // ===== Verification =====
+
+  /** What is verified, what could be, and what this server can offer. */
+  async verificationStatus() {
+    return this.request('/verify/status');
+  }
+
+  async sendEmailCode() {
+    return this.request('/verify/email/send', { method: 'POST' });
+  }
+
+  async confirmEmailCode(code: string) {
+    return this.request('/verify/email/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    });
+  }
+
+  /** Returns the GitHub URL to open, with a state the server will check back. */
+  async startGithubVerification(redirectUri: string) {
+    return this.request('/verify/github/start', {
+      method: 'POST',
+      body: JSON.stringify({ redirect_uri: redirectUri }),
+    });
+  }
+
+  async finishGithubVerification(code: string, state: string) {
+    return this.request('/verify/github/callback', {
+      method: 'POST',
+      body: JSON.stringify({ code, state }),
+    });
+  }
+
+  /** Issues the token to place on the site, and says where it goes. */
+  async startWebsiteVerification(url: string) {
+    return this.request('/verify/website/start', {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    });
+  }
+
+  async confirmWebsiteVerification() {
+    return this.request('/verify/website/confirm', { method: 'POST' });
+  }
+
+  /** Stored as a claim, not a verification — see the server's note. */
+  async setLinkedIn(url: string | null) {
+    return this.request('/verify/linkedin', {
+      method: 'PUT',
+      body: JSON.stringify({ url }),
+    });
+  }
+
   /** Attach this device's push token to the signed-in account. */
   async registerPushToken(token: string, platform: string) {
     return this.request('/push/register', {

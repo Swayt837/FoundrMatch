@@ -38,6 +38,7 @@ export const queryKeys = {
   premiumPlans: ['premium', 'plans'] as const,
   dealRoom: (matchId: string) => ['deal-room', matchId] as const,
   personality: ['assessment', 'personality'] as const,
+  verification: ['verification'] as const,
 };
 
 /** Matches move often (new message, unread count), so keep them fresh-ish. */
@@ -217,6 +218,52 @@ export function useCompatibilityReport(userId?: string) {
   return useMutation({
     mutationFn: () => api.getCompatibilityReport(userId as string),
   });
+}
+
+/**
+ * Verification state for the current user.
+ *
+ * Also reports which methods this deployment can actually perform, so the screen
+ * hides one it has no key for rather than offering a button that answers 503.
+ */
+export function useVerificationStatus() {
+  return useQuery({
+    queryKey: queryKeys.verification,
+    queryFn: () => api.verificationStatus(),
+    staleTime: 30_000,
+  });
+}
+
+/** Every verification mutation invalidates the same query, so they share a hook. */
+export function useVerificationActions() {
+  const queryClient = useQueryClient();
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: queryKeys.verification });
+    // A new badge changes how this user is rendered everywhere else.
+    queryClient.invalidateQueries({ queryKey: ['profile'] });
+  };
+
+  return {
+    sendEmailCode: useMutation({ mutationFn: () => api.sendEmailCode() }),
+    confirmEmailCode: useMutation({
+      mutationFn: (code: string) => api.confirmEmailCode(code),
+      onSuccess: invalidate,
+    }),
+    finishGithub: useMutation({
+      mutationFn: ({ code, state }: { code: string; state: string }) =>
+        api.finishGithubVerification(code, state),
+      onSuccess: invalidate,
+    }),
+    startWebsite: useMutation({ mutationFn: (url: string) => api.startWebsiteVerification(url) }),
+    confirmWebsite: useMutation({
+      mutationFn: () => api.confirmWebsiteVerification(),
+      onSuccess: invalidate,
+    }),
+    setLinkedIn: useMutation({
+      mutationFn: (url: string | null) => api.setLinkedIn(url),
+      onSuccess: invalidate,
+    }),
+  };
 }
 
 export function usePremiumStatus() {
